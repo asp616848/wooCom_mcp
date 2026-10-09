@@ -72,3 +72,59 @@ Usage: include "woo-store.secretValue" (list $existingData "key" (randAlphaNum 3
 {{ index . 2 | b64enc }}
 {{- end -}}
 {{- end }}
+
+{{/* woo-mcp image; the tag must come from the Makefile/deployer (.image-tag), never a default. */}}
+{{- define "woo-store.wooMcpImage" -}}
+{{- if not .Values.wooMcp.image.tag -}}
+{{- fail "wooMcp.image.tag is required (make store sets it from .image-tag)" -}}
+{{- end -}}
+{{ .Values.wooMcp.image.repository }}:{{ .Values.wooMcp.image.tag }}
+{{- end }}
+
+{{/* Env shared by the woo-mcp server and its helm-test selfcheck pod (DESIGN §9.1). */}}
+{{- define "woo-store.wooMcpEnv" -}}
+{{- $svc := printf "%s-woo-mcp" .Release.Name -}}
+{{- $ns := .Release.Namespace -}}
+- name: STORE_SLUG
+  value: {{ .Release.Name | quote }}
+- name: WC_INTERNAL_URL
+  value: "http://{{ .Release.Name }}-wordpress"
+- name: WC_PUBLIC_HOST
+  value: {{ .Values.store.host | quote }}
+- name: WC_CONSUMER_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "woo-store.secretName" . }}
+      key: wc-consumer-key
+- name: WC_CONSUMER_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "woo-store.secretName" . }}
+      key: wc-consumer-secret
+- name: STORE_TIMEOUT_MS
+  value: {{ .Values.wooMcp.storeTimeoutMs | quote }}
+- name: MCP_AUTH_MODE
+  value: bearer
+- name: MCP_AUTH_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "woo-store.secretName" . }}
+      key: mcp-token
+- name: MCP_ALLOWED_HOSTS
+  value: {{ printf "%s,%s:*,%s.%s,%s.%s:*,%s.%s.svc,%s.%s.svc:*,%s.%s.svc.cluster.local,%s.%s.svc.cluster.local:*" $svc $svc $svc $ns $svc $ns $svc $ns $svc $ns $svc $ns $svc $ns | quote }}
+- name: LOG_LEVEL
+  value: info
+{{- end }}
+
+{{/* Restricted-profile container hardening for our Python images (DESIGN §8.5). */}}
+{{- define "woo-store.pythonSecurityContext" -}}
+runAsNonRoot: true
+runAsUser: 10001
+runAsGroup: 10001
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+capabilities:
+  drop: ["ALL"]
+seccompProfile:
+  type: RuntimeDefault
+{{- end }}

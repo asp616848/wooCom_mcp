@@ -1,0 +1,57 @@
+{{- if .Values.wooMcp.enabled }}
+# This store's WooCommerce MCP server. Internal only: reached by the gateway through the
+# ClusterIP Service below; there is deliberately no Ingress for it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-woo-mcp
+  labels:
+    {{- include "woo-store.labels" (list . "woo-mcp") | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "woo-mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "woo-store.labels" (list . "woo-mcp") | nindent 8 }}
+        app.kubernetes.io/component: mcp
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: woo-mcp
+          image: {{ include "woo-store.wooMcpImage" . | quote }}
+          imagePullPolicy: {{ .Values.wooMcp.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            {{- include "woo-store.wooMcpEnv" . | nindent 12 }}
+          # Neither probe touches the store (DESIGN §4.4): a store outage must not restart or
+          # unready this pod, and Helm --wait must not wait on the post-install setup Job.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.wooMcp.resources | nindent 12 }}
+          securityContext:
+            {{- include "woo-store.pythonSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+{{- end }}

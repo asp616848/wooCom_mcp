@@ -1,0 +1,18 @@
+{{- if .Values.wooMcp.enabled }}
+# In-cluster address the gateway uses: http://<release>-woo-mcp.<namespace>:8080/mcp
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-woo-mcp
+  labels:
+    {{- include "woo-store.labels" (list . "woo-mcp") | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "woo-store.selectorLabels" (list . "woo-mcp") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

@@ -22,6 +22,13 @@ class McpServerSettings(ServiceSettings):
     mcp_auth_mode: Literal["bearer", "header"] = "bearer"
     mcp_auth_token: SecretStr = Field(min_length=16)
     mcp_auth_header: str = Field(default="X-Api-Key", pattern=r"^[A-Za-z0-9-]{1,64}$")
+    # Comma-separated Host header values accepted on /mcp (DNS-rebinding guard), e.g. the Service DNS names.
+    # localhost / 127.0.0.1 (any port) are always added for port-forward and in-pod checks.
+    mcp_allowed_hosts: str = ""
+
+    def allowed_hosts(self) -> list[str]:
+        hosts = [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
+        return [*hosts, "localhost:*", "127.0.0.1:*"]
 
 
 def load_settings[S: BaseSettings](cls: type[S]) -> S:

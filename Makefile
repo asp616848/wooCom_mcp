@@ -13,9 +13,12 @@ DASHBOARD   := services/dashboard
 TAG_FILE    := .image-tag
 # every services/<name>/Dockerfile becomes image wmg/<name>; override to build a subset: make images SERVICES=woo-mcp
 SERVICES    ?= $(patsubst services/%/Dockerfile,%,$(wildcard services/*/Dockerfile))
+IMAGE_TAG    = $(shell cat $(TAG_FILE) 2>/dev/null)
+# charts refuse to render without image tags; lint/kubeconform use a placeholder
+CHART_CHECK_SET := --set-string wooMcp.image.tag=check
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint typecheck test images kubeconform
+        status deps lint chart-lint typecheck test images kubeconform
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -35,15 +38,16 @@ cluster: ## Create the local k3d cluster if it does not exist
 cluster-delete: ## Delete the k3d cluster (destroys all data)
 	k3d cluster delete $(CLUSTER)
 
-store: ## Install/upgrade the store (STORE=main ENV=local)
+store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag from .image-tag, run `make images` first)
+	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
 	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) --create-namespace \
-	  -f $(STORE_CHART)/values-$(ENV).yaml --wait --timeout 10m
+	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.tag=$(IMAGE_TAG) --wait --timeout 10m
 
 store-uninstall: ## Uninstall the store release (PVCs and Secret are kept)
 	-helm uninstall $(STORE) -n $(STORE_NS)
 
-store-test: ## Run the store's helm tests
-	helm test $(STORE) -n $(STORE_NS) --logs
+store-test: ## Run the store's helm tests (selfcheck: signed REST calls + get_store_info via woo-mcp)
+	helm test $(STORE) -n $(STORE_NS) --logs --timeout 3m
 
 store-admin-password: ## Print the WordPress admin password (user: admin)
 	@kubectl get secret $(STORE)-store-credentials -n $(STORE_NS) -o jsonpath='{.data.wordpress-admin-password}' | base64 -d; echo
@@ -58,12 +62,14 @@ deps: ## Install the Python workspace (and dashboard deps once it exists)
 	uv sync --all-packages --locked
 	@if [ -f $(DASHBOARD)/package.json ]; then cd $(DASHBOARD) && npm ci; fi
 
-lint: ## ruff (lint + format check), dashboard ESLint, helm lint (every chart x local/prod)
+lint: chart-lint ## ruff (lint + format check), dashboard ESLint, helm lint (every chart x local/prod)
 	$(UV_RUN) ruff check .
 	$(UV_RUN) ruff format --check .
 	@if [ -f $(DASHBOARD)/package.json ]; then cd $(DASHBOARD) && npm run lint; fi
+
+chart-lint: ## helm lint every chart with local and prod values
 	@for c in $(CHARTS); do for e in local prod; do \
-	  if [ -f $$c/values-$$e.yaml ]; then helm lint $$c -f $$c/values-$$e.yaml --quiet || exit 1; fi; \
+	  if [ -f $$c/values-$$e.yaml ]; then helm lint $$c -f $$c/values-$$e.yaml $(CHART_CHECK_SET) --quiet || exit 1; fi; \
 	done; done
 
 typecheck: ## mypy --strict (Python) and tsc (dashboard)
@@ -89,6 +95,6 @@ images: ## Build service images (tag dev-<sha>[-<ts> if dirty] -> .image-tag) an
 kubeconform: ## Validate rendered charts (local + prod values) against Kubernetes schemas
 	@for c in $(CHARTS); do for e in local prod; do \
 	  if [ -f $$c/values-$$e.yaml ]; then echo "== $$c ($$e)"; \
-	    helm template kc $$c -f $$c/values-$$e.yaml | kubeconform -strict -summary -ignore-missing-schemas || exit 1; \
+	    helm template kc $$c -f $$c/values-$$e.yaml $(CHART_CHECK_SET) | kubeconform -strict -summary -ignore-missing-schemas || exit 1; \
 	  fi; \
 	done; done
