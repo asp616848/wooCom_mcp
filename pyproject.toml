@@ -1,0 +1,50 @@
+# uv workspace root (virtual: never built or installed). Members are the Python packages and services;
+# the React dashboard is a separate npm project. Versions: .project-tracker DECISIONS §Versions.
+[project]
+name = "wmg-workspace"
+version = "0.0.0"
+requires-python = ">=3.14,<3.15"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+exclude = ["services/dashboard"]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
+    # tests/e2e and scripts/mcp_cli.py
+    "mcp==2.3.0",
+    "httpx2==2.13.1",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["wmg_common", "wmg_gateway", "woo_mcp", "mcp_gst", "mcp_pincode"]
+
+[tool.ruff.lint.per-file-ignores]
+# asserts and literal fake secrets are fine in tests
+"**/tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "-q --import-mode=importlib"
+testpaths = ["packages", "services"]
+markers = [
+    "integration: needs Docker (Postgres) and fixture servers; run with make test-integration",
+]

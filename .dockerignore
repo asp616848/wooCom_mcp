@@ -1,0 +1,20 @@
+# Build context = repo root for the Python images (DESIGN §10.2). Keep it small and secret-free.
+.git
+.github
+.project-tracker
+**/.venv
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/node_modules
+**/tests
+services/dashboard
+charts
+deploy
+docs
+scripts
+backups
+.env
+.env.*
+*.pdf

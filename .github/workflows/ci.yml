@@ -1,0 +1,74 @@
+# CI (D81): lint, types and unit tests for the Python workspace and the dashboard; chart lint + schema validation.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.23"
+      - name: Install workspace (locked)
+        run: uv sync --all-packages --locked
+      - name: Ruff lint
+        run: uv run --all-packages --locked ruff check .
+      - name: Ruff format check
+        run: uv run --all-packages --locked ruff format --check .
+      - name: mypy --strict
+        run: uv run --all-packages --locked mypy packages/*/src/* services/*/src/*
+      - name: Unit tests
+        run: uv run --all-packages --locked pytest -m "not integration"
+
+  dashboard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - id: present
+        run: |
+          if [ -f services/dashboard/package.json ]; then echo "yes=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.present.outputs.yes == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: services/dashboard/package-lock.json
+      - if: steps.present.outputs.yes == 'true'
+        working-directory: services/dashboard
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+
+  charts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - name: Install kubeconform 0.8.0
+        run: |
+          curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: helm lint (every chart x local/prod)
+        run: |
+          for c in charts/*; do for e in local prod; do
+            if [ -f "$c/values-$e.yaml" ]; then helm lint "$c" -f "$c/values-$e.yaml" --quiet; fi
+          done; done
+      - name: kubeconform
+        run: make kubeconform
