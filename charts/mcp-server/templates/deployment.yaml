@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "mcp-server.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mcp-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mcp-server.labels" . | nindent 8 }}
+      annotations:
+        # restart pods when plain env values change
+        checksum/env: {{ toJson .Values.env | sha256sum | trunc 16 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.runAsUser }}
+        runAsGroup: {{ .Values.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: {{ include "mcp-server.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            - name: MCP_ALLOWED_HOSTS
+              value: {{ include "mcp-server.allowedHosts" . | quote }}
+            {{- if ne .Values.auth.type "none" }}
+            - name: MCP_AUTH_MODE
+              value: {{ .Values.auth.type | quote }}
+            - name: MCP_AUTH_HEADER
+              value: {{ .Values.auth.headerName | quote }}
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mcp-server.authSecretName" . }}
+                  key: token
+            {{- end }}
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if .Values.secretEnv }}
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-env
+          {{- end }}
+          livenessProbe:
+            {{- include "mcp-server.probe" (list . .Values.probes.livenessPath) | nindent 12 }}
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            {{- include "mcp-server.probe" (list . .Values.probes.readinessPath) | nindent 12 }}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- include "mcp-server.resources" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

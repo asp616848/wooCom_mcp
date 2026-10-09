@@ -15,17 +15,19 @@ TAG_FILE    := .image-tag
 SERVICES    ?= $(patsubst services/%/Dockerfile,%,$(wildcard services/*/Dockerfile))
 IMAGE_TAG    = $(shell cat $(TAG_FILE) 2>/dev/null)
 # charts refuse to render without image tags; lint/kubeconform use a placeholder
-CHART_CHECK_SET := --set-string wooMcp.image.tag=check
+CHART_CHECK_SET := --set-string wooMcp.image.tag=check --set-string image.repository=check --set-string image.tag=check
+UPSTREAMS_NS := mcp-upstreams
+SERVER_CHART := charts/mcp-server
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck test images kubeconform
+        status deps lint chart-lint typecheck test images kubeconform upstreams upstreams-uninstall
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
 
-up: cluster store ## Create cluster (if missing) and install everything
+up: cluster images upstreams store ## Create cluster (if missing), build images and install everything
 
-down: store-uninstall ## Uninstall releases (keeps cluster, data and Secrets)
+down: store-uninstall upstreams-uninstall ## Uninstall releases (keeps cluster, data and Secrets)
 
 reset: cluster-delete up ## Wipe the cluster and all data, then rebuild
 
@@ -43,6 +45,21 @@ store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag fro
 	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) --create-namespace \
 	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.tag=$(IMAGE_TAG) --wait --timeout 10m
 
+upstreams: ## Install/upgrade gst (bearer) + pincode (X-Api-Key) in mcp-upstreams (image tag from .image-tag)
+	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
+	kubectl create namespace $(UPSTREAMS_NS) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl label --overwrite namespace $(UPSTREAMS_NS) wmg.dev/role=upstreams pod-security.kubernetes.io/enforce=restricted
+	helm upgrade --install gst $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
+	  --set image.repository=wmg/mcp-gst --set-string image.tag=$(IMAGE_TAG) --set auth.type=bearer --set size=small \
+	  --set networkPolicy.allowInternet=false --wait --timeout 3m
+	helm upgrade --install pincode $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
+	  --set image.repository=wmg/mcp-pincode --set-string image.tag=$(IMAGE_TAG) --set auth.type=header \
+	  --set auth.headerName=X-Api-Key --set size=small --set networkPolicy.allowInternet=false --wait --timeout 3m
+
+upstreams-uninstall: ## Uninstall gst + pincode (credential Secrets are kept)
+	-helm uninstall gst -n $(UPSTREAMS_NS)
+	-helm uninstall pincode -n $(UPSTREAMS_NS)
+
 store-uninstall: ## Uninstall the store release (PVCs and Secret are kept)
 	-helm uninstall $(STORE) -n $(STORE_NS)
 
@@ -55,8 +72,9 @@ store-admin-password: ## Print the WordPress admin password (user: admin)
 setup-logs: ## Show logs of the last store setup Job
 	kubectl logs -n $(STORE_NS) job/$(STORE)-setup --tail=200
 
-status: ## Show store resources
+status: ## Show store and upstream resources
 	kubectl get all,pvc,ingress -n $(STORE_NS)
+	-kubectl get all,networkpolicy -n $(UPSTREAMS_NS)
 
 deps: ## Install the Python workspace (and dashboard deps once it exists)
 	uv sync --all-packages --locked

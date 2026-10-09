@@ -1,0 +1,12 @@
+[
+  {"pincode": "400001", "city": "Mumbai", "state_code": "MH", "state": "Maharashtra"},
+  {"pincode": "411001", "city": "Pune", "state_code": "MH", "state": "Maharashtra"},
+  {"pincode": "110001", "city": "New Delhi", "state_code": "DL", "state": "Delhi"},
+  {"pincode": "560001", "city": "Bengaluru", "state_code": "KA", "state": "Karnataka"},
+  {"pincode": "600001", "city": "Chennai", "state_code": "TN", "state": "Tamil Nadu"},
+  {"pincode": "700001", "city": "Kolkata", "state_code": "WB", "state": "West Bengal"},
+  {"pincode": "500001", "city": "Hyderabad", "state_code": "TS", "state": "Telangana"},
+  {"pincode": "380001", "city": "Ahmedabad", "state_code": "GJ", "state": "Gujarat"},
+  {"pincode": "302001", "city": "Jaipur", "state_code": "RJ", "state": "Rajasthan"},
+  {"pincode": "226001", "city": "Lucknow", "state_code": "UP", "state": "Uttar Pradesh"}
+]
