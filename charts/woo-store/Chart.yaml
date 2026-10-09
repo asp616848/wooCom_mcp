@@ -3,6 +3,6 @@ name: woo-store
 description: One WooCommerce "store unit" - WordPress, MariaDB and the store's own WooCommerce MCP server.
 type: application
 # Chart version: bump on every chart change.
-version: 0.1.0
+version: 0.2.0
 # Version of the app being deployed (WordPress).
 appVersion: "7.1.3"

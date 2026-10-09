@@ -1,0 +1,33 @@
+{{- if .Values.wooMcp.enabled }}
+# `helm test <release>`: signed REST calls to the store + get_store_info through woo-mcp's tools.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-selfcheck
+  labels:
+    {{- include "woo-store.labels" (list . "selfcheck") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  containers:
+    - name: selfcheck
+      image: {{ include "woo-store.wooMcpImage" . | quote }}
+      imagePullPolicy: {{ .Values.wooMcp.image.pullPolicy }}
+      command: ["python", "-m", "woo_mcp.selfcheck"]
+      env:
+        {{- include "woo-store.wooMcpEnv" . | nindent 8 }}
+      resources:
+        {{- toYaml .Values.wooMcp.selfcheckResources | nindent 8 }}
+      securityContext:
+        {{- include "woo-store.pythonSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir:
+        sizeLimit: 16Mi
+{{- end }}

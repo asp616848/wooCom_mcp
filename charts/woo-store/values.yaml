@@ -87,6 +87,30 @@ setup:
       cpu: "1"
       memory: 512Mi
 
+# This store's WooCommerce MCP server (internal only, no Ingress).
+wooMcp:
+  enabled: true
+  image:
+    repository: wmg/woo-mcp
+    # Required: set by `make store` from .image-tag (empty = render fails on purpose).
+    tag: ""
+    pullPolicy: IfNotPresent
+  storeTimeoutMs: 10000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  selfcheckResources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+
 # NetworkPolicies (templates added in phase P11).
 networkPolicy:
   enabled: true

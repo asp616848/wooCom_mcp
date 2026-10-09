@@ -74,6 +74,10 @@ def configure_logging(service: str, level: str = "info") -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    # The HTTP client logs every request URL at INFO; signed store URLs carry the consumer key and
+    # signature in the query string, so keep only its warnings.
+    for name in ("httpx2", "httpcore2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:

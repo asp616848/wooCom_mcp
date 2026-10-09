@@ -50,3 +50,12 @@ def test_structlog_and_stdlib_lines_are_json_and_redacted(capsys: pytest.Capture
     assert second["event"] == "stdlib says hi"
     assert second["logger"] == "uvicorn.error"
     assert "secret-value" not in json.dumps(lines)
+
+
+def test_http_client_request_urls_not_logged(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging("unit-test", "info")
+    logging.getLogger("httpx2").info("HTTP Request: GET http://store/x?oauth_signature=abc")
+    logging.getLogger("httpx2").warning("pool exhausted")
+    out = capsys.readouterr().out
+    assert "oauth_signature" not in out
+    assert "pool exhausted" in out
