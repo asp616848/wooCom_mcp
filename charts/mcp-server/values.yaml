@@ -1,0 +1,42 @@
+# Generic, stateless MCP server (DESIGN §9.4). The release name is the server's name and Service name:
+# release "gst" in namespace "mcp-upstreams" → http://gst.mcp-upstreams.svc.cluster.local:8080/mcp
+
+image:
+  repository: ""
+  # Required (empty = render fails on purpose); `make upstreams` sets it from .image-tag.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+port: 8080
+# MCP endpoint path; informational for the gateway's server URL, the app decides the real path.
+path: /mcp
+
+auth:
+  # bearer = "Authorization: Bearer <token>", header = "<headerName>: <token>", none = no credential.
+  type: bearer
+  headerName: X-Api-Key
+  # Pre-created Secret with key "token". Empty = the chart generates one (kept across upgrades/uninstall).
+  existingSecret: ""
+
+# Plain env vars for the container.
+env: {}
+# Sensitive env vars; rendered into Secret <release>-env.
+secretEnv: {}
+
+# small: req 25m/96Mi, lim 200m/192Mi | medium: req 100m/160Mi, lim 500m/320Mi
+size: small
+
+# Pod/container user. Our Python images run as 10001; hosted images may need another non-root uid.
+runAsUser: 10001
+
+networkPolicy:
+  enabled: true
+  # true = egress to DNS + internet :443 (private ranges excluded); false = no egress at all.
+  allowInternet: false
+  gatewayNamespace: mcp-platform
+
+probes:
+  # http = GET livenessPath/readinessPath; tcp = port open (for hosted images without health routes).
+  type: http
+  livenessPath: /livez
+  readinessPath: /readyz

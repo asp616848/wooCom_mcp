@@ -1,0 +1,7 @@
+apiVersion: v2
+name: mcp-server
+description: Generic chart for one small, stateless MCP server behind the gateway (gst, pincode, hosted servers).
+type: application
+# Chart version: bump on every chart change.
+version: 0.1.0
+appVersion: "0.1.0"
