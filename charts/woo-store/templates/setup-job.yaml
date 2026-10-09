@@ -1,0 +1,85 @@
+# One-time, idempotent store setup (WordPress install, WooCommerce, COD, shipping, REST key).
+# A Helm hook because Jobs are immutable: before-hook-creation deletes the previous Job so a
+# fresh one runs on every install/upgrade, converging the store to the values.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-setup
+  labels:
+    {{- include "woo-store.labels" (list . "setup") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.setup.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.setup.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "woo-store.labels" (list . "setup") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # uid/gid 33 = www-data in the apache WordPress image, which owns the files on the
+      # shared volume. (The CLI image's own www-data is 82, which couldn't write them.)
+      securityContext:
+        runAsUser: 33
+        runAsGroup: 33
+      containers:
+        - name: setup
+          image: "{{ .Values.setup.image.repository }}:{{ .Values.setup.image.tag }}"
+          imagePullPolicy: {{ .Values.setup.image.pullPolicy }}
+          command: ["/bin/sh", "/scripts/setup.sh"]
+          env:
+            {{- include "woo-store.wordpressEnv" . | nindent 12 }}
+            - name: HOME
+              value: /tmp
+            - name: WP_CLI_CACHE_DIR
+              value: /tmp/wp-cli-cache
+            - name: SITE_URL
+              value: {{ include "woo-store.siteUrl" . | quote }}
+            - name: STORE_TITLE
+              value: {{ .Values.store.title | quote }}
+            - name: STORE_ADMIN_EMAIL
+              value: {{ .Values.store.adminEmail | quote }}
+            - name: STORE_TIMEZONE
+              value: {{ .Values.store.timezone | quote }}
+            - name: STORE_CURRENCY
+              value: {{ .Values.store.currency | quote }}
+            - name: STORE_COUNTRY
+              value: {{ .Values.store.country | quote }}
+            - name: WC_VERSION
+              value: {{ .Values.woocommerce.version | quote }}
+            - name: SAMPLE_DATA
+              value: {{ .Values.woocommerce.sampleData | quote }}
+            - name: WP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woo-store.secretName" . }}
+                  key: wordpress-admin-password
+            - name: WC_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woo-store.secretName" . }}
+                  key: wc-consumer-key
+            - name: WC_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woo-store.secretName" . }}
+                  key: wc-consumer-secret
+          resources:
+            {{- toYaml .Values.setup.resources | nindent 12 }}
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: wordpress-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress
+        - name: scripts
+          configMap:
+            name: {{ .Release.Name }}-setup-scripts
+            defaultMode: 0555

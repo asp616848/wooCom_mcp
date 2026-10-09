@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels:
+    {{- include "woo-store.labels" (list . "wordpress") | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  # One replica: the volume is ReadWriteOnce.
+  replicas: 1
+  # Recreate = stop the old pod before starting the new one, so two pods never
+  # write to the same volume during an upgrade.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "woo-store.labels" (list . "wordpress") | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: wordpress
+          image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"
+          imagePullPolicy: {{ .Values.wordpress.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          # The official image turns these into wp-config.php on first start.
+          env:
+            {{- include "woo-store.wordpressEnv" . | nindent 12 }}
+          # Startup: first boot copies WordPress into the empty volume.
+          startupProbe:
+            httpGet:
+              path: /wp-includes/images/blank.gif
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          # Liveness: is Apache serving? A static file, so no PHP/DB involved.
+          # A DB outage must not make Kubernetes restart WordPress.
+          livenessProbe:
+            httpGet:
+              path: /wp-includes/images/blank.gif
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness: can WordPress render a page (PHP + DB)? If not, stop sending traffic.
+          readinessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.store.host | quote }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.wordpress.resources | nindent 12 }}
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html
+      volumes:
+        - name: wordpress-data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-wordpress

@@ -1,0 +1,17 @@
+# Stable in-cluster address for WordPress: http://<release>-wordpress (port 80).
+# Used by the Ingress, and later by the setup Job and the Woo MCP server.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels:
+    {{- include "woo-store.labels" (list . "wordpress") | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

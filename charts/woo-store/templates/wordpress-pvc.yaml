@@ -1,0 +1,18 @@
+# Holds /var/www/html: WordPress core, plugins (WooCommerce), uploads, wp-config.php.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-wordpress
+  labels:
+    {{- include "woo-store.labels" (list . "wordpress") | nindent 4 }}
+  annotations:
+    # Keep store content on `helm uninstall`, like the DB volume.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.wordpress.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.wordpress.persistence.size }}
