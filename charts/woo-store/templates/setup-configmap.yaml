@@ -1,0 +1,13 @@
+# Scripts for the setup Job, kept as real files under charts/woo-store/files/.
+# A normal release resource: Helm applies it before running post-install/upgrade hooks.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-setup-scripts
+  labels:
+    {{- include "woo-store.labels" (list . "setup") | nindent 4 }}
+data:
+  setup.sh: |
+    {{- .Files.Get "files/setup.sh" | nindent 4 }}
+  register-wc-key.php: |
+    {{- .Files.Get "files/register-wc-key.php" | nindent 4 }}

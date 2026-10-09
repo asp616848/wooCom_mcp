@@ -1,0 +1,6 @@
+# Local (k3d) overrides. Defaults in values.yaml already target local,
+# so this file stays small and only grows where local differs.
+
+mariadb:
+  persistence:
+    size: 2Gi

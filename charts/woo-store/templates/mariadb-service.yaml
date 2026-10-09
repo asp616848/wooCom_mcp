@@ -1,0 +1,17 @@
+# Headless Service (clusterIP: None): DNS name "<release>-mariadb" resolves straight
+# to the MariaDB pod's IP. StatefulSets need one for stable per-pod DNS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-mariadb
+  labels:
+    {{- include "woo-store.labels" (list . "mariadb") | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  clusterIP: None
+  selector:
+    {{- include "woo-store.selectorLabels" (list . "mariadb") | nindent 4 }}
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql

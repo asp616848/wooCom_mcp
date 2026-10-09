@@ -1,0 +1,109 @@
+# Default values for woo-store.
+# Environment-specific overrides live in values-local.yaml and values-prod.yaml.
+
+# Public address and business settings of the store. host/scheme are used by the Ingress
+# and baked into WordPress (WP_HOME / WP_SITEURL), so they must match the URL people visit.
+store:
+  host: shop.localhost
+  scheme: http
+  title: "Main Store"
+  timezone: "Asia/Kolkata"
+  currency: "INR"
+  # WooCommerce "country:state" code.
+  country: "IN:MH"
+  adminEmail: "admin@example.com"
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations: {}
+  tls:
+    enabled: false
+    # Secret holding the TLS cert (e.g. created by cert-manager).
+    secretName: ""
+
+# Name of a pre-created Secret holding all store credentials.
+# Empty = the chart generates random credentials on first install and keeps them.
+# Expected keys: mariadb-root-password, mariadb-password, wordpress-admin-password,
+#                wc-consumer-key, wc-consumer-secret, mcp-token
+existingSecret: ""
+
+mariadb:
+  image:
+    repository: mariadb
+    tag: "11.8"
+    pullPolicy: IfNotPresent
+  database: wordpress
+  user: wordpress
+  persistence:
+    size: 2Gi
+    # Empty = cluster default StorageClass (local-path on k3s/k3d).
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+wordpress:
+  image:
+    repository: wordpress
+    tag: "7.1.3-php8.3-apache"
+    pullPolicy: IfNotPresent
+  # WP_ENVIRONMENT_TYPE: local | development | staging | production
+  environmentType: local
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+woocommerce:
+  # Pinned plugin version; the setup Job installs/converges to it on every install/upgrade.
+  version: "11.1.2"
+  # Create 5 demo products when the store has none.
+  sampleData: true
+
+# One-time (idempotent) store setup, run as a Helm hook after install and upgrade.
+setup:
+  image:
+    repository: wordpress
+    tag: "cli-2.12.0-php8.3"
+    pullPolicy: IfNotPresent
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# NetworkPolicies (templates added in phase P11).
+networkPolicy:
+  enabled: true
+  gatewayNamespace: mcp-platform
+
+# ResourceQuota + LimitRange (templates added in phase P14).
+guardrails:
+  enabled: true
+  quota:
+    requestsCpu: "1"
+    requestsMemory: 1536Mi
+    limitsCpu: "4"
+    limitsMemory: 3Gi
+    pods: "8"
+    pvcs: "3"
+    requestsStorage: 6Gi
+  limitRange:
+    defaultRequest: { cpu: 50m, memory: 64Mi }
+    default: { cpu: 500m, memory: 512Mi }
+    max: { cpu: "2", memory: 1536Mi }

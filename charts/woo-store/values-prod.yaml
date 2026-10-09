@@ -1,0 +1,42 @@
+# Production-like (VPS / k3s) overrides.
+
+store:
+  host: shop.example.com # replace with your real domain
+  scheme: https
+
+ingress:
+  annotations:
+    # Requires cert-manager + a ClusterIssuer named letsencrypt (stand-out item, optional).
+    cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    enabled: true
+    secretName: shop-tls
+
+# In production, create the Secret yourself (kubectl / sealed-secrets / external-secrets)
+# instead of letting the chart generate it.
+# existingSecret: main-store-credentials
+
+mariadb:
+  persistence:
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+wordpress:
+  environmentType: production
+  persistence:
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi

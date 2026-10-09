@@ -1,0 +1,26 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+values-secret*.yaml
+*-secret.local.yaml
+
+# Personal + AI-agent project tracker
+.project-tracker/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Dependencies / build output (language-neutral for now)
+node_modules/
+__pycache__/
+.venv/
+venv/
+dist/
+build/
+*.log
