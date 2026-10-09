@@ -24,3 +24,14 @@ venv/
 dist/
 build/
 *.log
+
+# Python tooling / build artefacts
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local images, backups, prod env
+.image-tag
+backups/
