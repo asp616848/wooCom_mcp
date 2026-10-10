@@ -1,5 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, LogOut, MessageSquare, ScrollText, Server, Users, type LucideIcon } from 'lucide-react';
+import {
+  KeyRound,
+  LogOut,
+  MessageSquare,
+  Plug,
+  ScrollText,
+  Server,
+  Users,
+  type LucideIcon,
+} from 'lucide-react';
 import { Navigate, NavLink, Outlet, useNavigate } from 'react-router';
 
 import { useMe } from '@/auth';
@@ -14,12 +23,13 @@ interface NavItem {
   roles: Role[];
 }
 
-// Pages arrive in P9/P10; the nav is role-aware from the start (DESIGN §11).
+// Role-aware nav (DESIGN §11). The API enforces the same rules; hiding links is only convenience.
 const NAV: NavItem[] = [
   { to: '/servers', label: 'Servers', icon: Server, roles: ['admin', 'member'] },
   { to: '/members', label: 'Members', icon: Users, roles: ['admin'] },
   { to: '/keys', label: 'API keys', icon: KeyRound, roles: ['admin', 'member'] },
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: ['admin', 'member'] },
+  { to: '/connect', label: 'Connect', icon: Plug, roles: ['admin', 'member'] },
   { to: '/chat', label: 'Chat', icon: MessageSquare, roles: ['admin', 'member'] },
 ];
 
@@ -62,7 +72,8 @@ export function Layout() {
           ))}
         </nav>
       </aside>
-      <div className="flex flex-1 flex-col">
+      {/* min-w-0: lets wide tables/code scroll inside main instead of widening the whole page */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-end gap-3 border-b border-zinc-200 bg-white px-6 py-3">
           <span className="text-sm">
             {user.name} <span className="text-zinc-500">· {user.email}</span>
