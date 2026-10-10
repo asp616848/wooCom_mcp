@@ -1,0 +1,28 @@
+# Production-like (VPS / k3s) overrides (DESIGN §17). Hosts are replaced by the deploy script
+# (<label>.<ip-dashed>.sslip.io); secrets come from scripts/prod-secrets.sh.
+hosts:
+  dashboard: dashboard.example.com
+  gateway: gateway.example.com
+scheme: https
+
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: true
+
+existingSecret: platform-credentials
+
+postgres:
+  persistence:
+    size: 5Gi
+    storageClass: local-path
+
+gateway:
+  replicas: 2
+  cookieSecure: true
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  pdb:
+    enabled: true

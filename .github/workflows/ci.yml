@@ -28,7 +28,7 @@ jobs:
       - name: Ruff format check
         run: uv run --all-packages --locked ruff format --check .
       - name: mypy --strict
-        run: uv run --all-packages --locked mypy packages/*/src/* services/*/src/*
+        run: make mypy
       - name: Unit tests
         run: uv run --all-packages --locked pytest -m "not integration"
 

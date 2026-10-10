@@ -1,0 +1,57 @@
+# dashboard host: /api → gateway, / → dashboard (same origin, so the session cookie needs no CORS).
+# gateway host: /mcp (and /mcp/search) → gateway, for MCP clients.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "mcp-platform.labels" (list . "dashboard") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.hosts.dashboard | quote }}]
+      secretName: {{ .Values.ingress.tls.dashboardSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.dashboard | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-gateway, port: { name: http } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-dashboard, port: { name: http } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.hosts.gateway | quote }}]
+      secretName: {{ .Values.ingress.tls.gatewaySecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.hosts.gateway | quote }}
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service: { name: {{ .Release.Name }}-gateway, port: { name: http } }

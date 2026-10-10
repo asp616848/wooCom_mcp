@@ -1,0 +1,154 @@
+{{- $secret := include "mcp-platform.secretName" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-seed-servers
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+data:
+  seed-servers.json: {{ toJson .Values.seedServers | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mcp-platform.selectorLabels" (list . "gateway") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mcp-platform.selectorLabels" (list . "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mcp-platform.labels" (list . "gateway") | nindent 8 }}
+      annotations:
+        checksum/seed-servers: {{ toJson .Values.seedServers | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: wmg-gateway
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: {{ include "mcp-platform.image" .Values.gateway.image | quote }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PUBLIC_DASHBOARD_URL
+              value: {{ include "mcp-platform.url" (list . .Values.hosts.dashboard) | quote }}
+            - name: PUBLIC_GATEWAY_URL
+              value: {{ include "mcp-platform.url" (list . .Values.hosts.gateway) | quote }}
+            - name: PUBLIC_MCP_URL
+              value: "{{ include "mcp-platform.url" (list . .Values.hosts.gateway) }}/mcp"
+            - name: ALLOWED_HOSTS
+              value: "{{ .Values.hosts.dashboard }},{{ .Values.hosts.gateway }},localhost,127.0.0.1,{{ .Release.Name }}-gateway,{{ .Release.Name }}-gateway.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: postgres-password }
+            # $(VAR) is expanded by Kubernetes from the variable above (generated password is alphanumeric).
+            - name: DATABASE_URL
+              value: "postgresql://wmg:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/wmg"
+            - name: API_KEY_PEPPER
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: api-key-pepper }
+            - name: CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: credential-encryption-key }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: jwt-secret }
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: {{ .Values.bootstrapAdminEmail | quote }}
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $secret }}, key: admin-password }
+            - name: SEED_SERVERS_FILE
+              value: /config/seed-servers.json
+            - name: SEED_CREDENTIALS_DIR
+              value: /seed-credentials
+            - name: COOKIE_SECURE
+              value: {{ .Values.gateway.cookieSecure | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.gateway.logLevel | quote }}
+          lifecycle:
+            # let Traefik drop the endpoint before uvicorn stops accepting connections
+            preStop:
+              exec:
+                command: ["sleep", "3"]
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            {{- include "mcp-platform.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - name: seed-servers
+              mountPath: /config
+              readOnly: true
+            - name: seed-credentials
+              mountPath: /seed-credentials
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: seed-servers
+          configMap:
+            name: {{ .Release.Name }}-seed-servers
+        # Optional: Secrets copied from the upstream namespaces by `make seed-credentials`.
+        - name: seed-credentials
+          projected:
+            sources:
+              {{- range .Values.seedServers }}
+              - secret:
+                  name: {{ .slug }}-upstream-credential
+                  optional: true
+                  items:
+                    - key: credential
+                      path: {{ .slug }}/credential
+              {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+{{- if .Values.gateway.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "mcp-platform.selectorLabels" (list . "gateway") | nindent 6 }}
+{{- end }}

@@ -1,0 +1,77 @@
+# Platform release (DESIGN §2, §5, §11). Release name "platform" in namespace "mcp-platform" gives
+# platform-gateway, platform-dashboard, platform-postgres and Secret platform-credentials.
+
+hosts:
+  dashboard: dashboard.localhost   # UI + /api
+  gateway: gateway.localhost       # /mcp for MCP clients
+scheme: http
+
+ingress:
+  className: traefik
+  annotations: {}
+  tls:
+    enabled: false
+    dashboardSecretName: dashboard-tls
+    gatewaySecretName: gateway-tls
+
+# Pre-created Secret with keys postgres-password, api-key-pepper, credential-encryption-key (base64 of 32 bytes),
+# jwt-secret, admin-password. Empty = generated on first install and kept (resource-policy keep).
+existingSecret: ""
+
+# First-boot admin (password: `make admin-password`). Only used while the database is empty.
+bootstrapAdminEmail: admin@example.com
+
+# Servers registered on first boot (DESIGN §6 "Bootstrap"). Credentials come from Secrets
+# <slug>-upstream-credential (key "credential") created by `make seed-credentials`.
+seedServers:
+  - slug: woo-main
+    name: WooCommerce (main store)
+    url: http://main-woo-mcp.store-main.svc.cluster.local:8080/mcp
+    authType: bearer
+  - slug: gst
+    name: GST calculator
+    url: http://gst.mcp-upstreams.svc.cluster.local:8080/mcp
+    authType: bearer
+  - slug: pincode
+    name: Delivery checker
+    url: http://pincode.mcp-upstreams.svc.cluster.local:8080/mcp
+    authType: header
+    authHeaderName: X-Api-Key
+
+postgres:
+  image:
+    repository: postgres
+    tag: "17.11-alpine3.24"
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+gateway:
+  replicas: 1
+  image:
+    repository: wmg/gateway
+    # Required: set by `make platform` from .image-tag.
+    tag: ""
+    pullPolicy: IfNotPresent
+  cookieSecure: false
+  logLevel: info
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # PodDisruptionBudget (minAvailable 1); enable when replicas > 1 (prod).
+  pdb:
+    enabled: false
+
+dashboard:
+  image:
+    repository: wmg/dashboard
+    # Required: set by `make platform` from .image-tag.
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 64Mi }

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: mcp-platform
+description: Woo MCP Gateway platform - gateway (API + MCP endpoint), dashboard and its Postgres.
+type: application
+# Chart version: bump on every chart change.
+version: 0.1.0
+appVersion: "0.1.0"
