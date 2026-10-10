@@ -27,7 +27,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck mypy test test-integration images kubeconform upstreams upstreams-uninstall \
+        status deps lint chart-lint typecheck mypy test test-integration test-k8s images kubeconform upstreams upstreams-uninstall \
         platform-ns seed-credentials secrets-llm llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
@@ -50,7 +50,10 @@ cluster-delete: ## Delete the k3d cluster (destroys all data)
 
 store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag from .image-tag, run `make images` first)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
-	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) --create-namespace \
+	@kubectl create namespace $(STORE_NS) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@# D22: the apache WordPress image needs root to bind :80, so stores run under PSA baseline (not restricted)
+	@kubectl label --overwrite namespace $(STORE_NS) wmg.dev/role=store pod-security.kubernetes.io/enforce=baseline >/dev/null
+	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) \
 	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.tag=$(IMAGE_TAG) --wait --timeout 10m
 
 upstreams: ## Install/upgrade gst (bearer) + pincode (X-Api-Key) in mcp-upstreams (image tag from .image-tag)
@@ -150,6 +153,9 @@ test: ## Unit tests: pytest (and vitest once the dashboard exists)
 
 test-integration: ## Integration tests (needs Docker: starts postgres:17.11-alpine3.24 on localhost:55432)
 	$(UV_RUN) pytest -m integration
+
+test-k8s: ## Network isolation, PSA, RBAC and live SSRF checks against the running cluster (TESTING §4)
+	$(UV_RUN) pytest tests/e2e/test_k8s.py -m e2e
 
 images: ## Build service images (tag dev-<sha>[-<ts> if dirty] -> .image-tag) and import them into k3d
 	@if [ -z "$(strip $(SERVICES))" ]; then echo "No services/*/Dockerfile yet - nothing to build"; exit 0; fi; \

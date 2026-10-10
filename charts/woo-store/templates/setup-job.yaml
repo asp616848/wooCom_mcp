@@ -22,9 +22,13 @@ spec:
       restartPolicy: Never
       # uid/gid 33 = www-data in the apache WordPress image, which owns the files on the
       # shared volume. (The CLI image's own www-data is 82, which couldn't write them.)
+      automountServiceAccountToken: false
       securityContext:
+        runAsNonRoot: true
         runAsUser: 33
         runAsGroup: 33
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: setup
           image: "{{ .Values.setup.image.repository }}:{{ .Values.setup.image.tag }}"
@@ -69,6 +73,10 @@ spec:
                   key: wc-consumer-secret
           resources:
             {{- toYaml .Values.setup.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: wordpress-data
               mountPath: /var/www/html

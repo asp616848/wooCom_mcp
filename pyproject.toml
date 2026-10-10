@@ -52,4 +52,5 @@ addopts = "-q --import-mode=importlib"
 testpaths = ["packages", "services"]
 markers = [
     "integration: needs Docker (Postgres) and fixture servers; run with make test-integration",
+    "e2e: runs against the live cluster (make up first); run with make test-k8s / make e2e",
 ]

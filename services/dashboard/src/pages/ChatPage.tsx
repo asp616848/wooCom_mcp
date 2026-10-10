@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 
 import { useMe } from '@/auth';
 import { errorMessage, PageHeader } from '@/components/common';
+import { Markdown } from '@/components/markdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api';
@@ -68,6 +69,7 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => () => abort.current?.abort(), []);
   // Block body: an effect's return value is its cleanup, and scrollIntoView() returns a Promise in newer browsers.
@@ -142,10 +144,21 @@ export function ChatPage() {
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-4" aria-live="polite">
         {turns.length === 0 && (
           <div className="space-y-3 rounded-xl border border-dashed border-zinc-300 bg-white p-6">
-            <p className="text-sm text-zinc-600">Ask about orders, products, GST or delivery. For example:</p>
+            <p className="text-sm text-zinc-600">
+              Ask about orders, products, GST or delivery. Pick an example to edit it, then press Send:
+            </p>
             <div className="flex flex-wrap gap-2">
               {EXAMPLES.map((example) => (
-                <Button key={example} variant="outline" size="sm" onClick={() => void send(example)}>
+                <Button
+                  key={example}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // fill, don't send: some examples change the store, so the user reviews and presses Send
+                    setInput(example);
+                    textarea.current?.focus();
+                  }}
+                >
                   {example}
                 </Button>
               ))}
@@ -168,6 +181,7 @@ export function ChatPage() {
 
       <form onSubmit={onSubmit} className="flex items-end gap-2 border-t border-zinc-200 pt-4">
         <textarea
+          ref={textarea}
           aria-label="Message"
           className="max-h-40 min-h-10 flex-1 resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:bg-zinc-50"
           placeholder={
@@ -202,8 +216,8 @@ function AssistantTurn({ turn }: { turn: Extract<Turn, { role: 'assistant' }> })
         </p>
       )}
       {turn.content && (
-        <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-2 text-sm whitespace-pre-wrap">
-          {turn.content}
+        <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-2 text-sm break-words">
+          <Markdown>{turn.content}</Markdown>
         </div>
       )}
       {turn.error && (

@@ -129,6 +129,7 @@ function AdminActions({ server }: { server: McpServer }) {
 
   const update = useMutation({
     mutationFn: (body: ServerInput) => serversApi.update(server.id, body),
+    meta: { silent: true }, // the form shows the error inline
     onSuccess: ({ server: s }) => {
       void refresh();
       setEditing(false);
@@ -170,11 +171,19 @@ function AdminActions({ server }: { server: McpServer }) {
         <Trash2 className="size-4" /> Delete
       </Button>
 
-      <Dialog open={editing} onClose={() => setEditing(false)} title={`Edit ${server.name}`}>
+      <Dialog
+        open={editing}
+        onClose={() => {
+          setEditing(false);
+          update.reset();
+        }}
+        title={`Edit ${server.name}`}
+      >
         <ServerForm
           server={server}
           submitLabel="Save changes"
           pending={update.isPending}
+          error={update.error}
           onSubmit={(body) => update.mutate(body)}
         />
       </Dialog>

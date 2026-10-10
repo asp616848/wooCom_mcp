@@ -1,0 +1,167 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+DESIGN §8.3: default-deny for every pod in the store namespace (one store per namespace), then one allow-list per
+component. Pods are matched by app.kubernetes.io/name + instance, so a pod only gets what its role needs.
+*/}}
+{{- $np := .Values.networkPolicy }}
+{{- $rel := .Release.Name }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-default-deny
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# WordPress: public traffic via Traefik; woo-mcp + selfcheck call its REST API. Egress: MariaDB, DNS, public web.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-wordpress
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.traefikPodLabels | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "woo-mcp") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "selfcheck") | nindent 14 }}
+      ports:
+        - {port: 80, protocol: TCP}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "mariadb") | nindent 14 }}
+      ports:
+        - {port: 3306, protocol: TCP}
+    {{- include "woo-store.dnsEgress" . | nindent 4 }}
+    {{- include "woo-store.publicWebEgress" . | nindent 4 }}
+---
+# MariaDB: only WordPress and the setup Job; no egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-mariadb
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "mariadb") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "setup") | nindent 14 }}
+      ports:
+        - {port: 3306, protocol: TCP}
+  egress: []
+---
+# Setup Job (WP-CLI): MariaDB, DNS, public web (WooCommerce plugin download). No ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-setup
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "setup") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "mariadb") | nindent 14 }}
+      ports:
+        - {port: 3306, protocol: TCP}
+    {{- include "woo-store.dnsEgress" . | nindent 4 }}
+    {{- include "woo-store.publicWebEgress" . | nindent 4 }}
+{{- if .Values.wooMcp.enabled }}
+---
+# woo-mcp: only gateway pods (platform namespace) and this store's selfcheck; egress: WordPress + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-woo-mcp
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "woo-mcp") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              wmg.dev/role: platform
+              kubernetes.io/metadata.name: {{ $np.gatewayNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "selfcheck") | nindent 14 }}
+      ports:
+        - {port: 8080, protocol: TCP}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 14 }}
+      ports:
+        - {port: 80, protocol: TCP}
+    {{- include "woo-store.dnsEgress" . | nindent 4 }}
+---
+# selfcheck (helm test): woo-mcp + WordPress + DNS; no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-selfcheck
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woo-store.selectorLabels" (list . "selfcheck") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "woo-mcp") | nindent 14 }}
+      ports:
+        - {port: 8080, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woo-store.selectorLabels" (list . "wordpress") | nindent 14 }}
+      ports:
+        - {port: 80, protocol: TCP}
+    {{- include "woo-store.dnsEgress" . | nindent 4 }}
+{{- end }}
+{{- end }}

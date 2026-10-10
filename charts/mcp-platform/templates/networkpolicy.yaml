@@ -1,0 +1,125 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /* DESIGN §8.3: default-deny for the platform namespace, then allow-lists for gateway, dashboard, Postgres. */}}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels:
+    {{- include "mcp-platform.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# Gateway: Traefik in; out to Postgres, MCP upstreams (store / upstreams / hosted namespaces by role label), DNS,
+# the Kubernetes API (deployer Jobs, P14) and the public internet :443 (LLM, external MCP servers; SSRF-guarded too).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mcp-platform.selectorLabels" (list . "gateway") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        {{- include "mcp-platform.traefikPeer" . | nindent 8 }}
+      ports:
+        - {port: 8080, protocol: TCP}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mcp-platform.selectorLabels" (list . "postgres") | nindent 14 }}
+      ports:
+        - {port: 5432, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              wmg.dev/role: store
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woo-mcp
+      ports:
+        - {port: 8080, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              wmg.dev/role: upstreams
+      ports:
+        - {port: 8080, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              wmg.dev/role: hosted
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    {{- if $np.kubeApiCIDRs }}
+    - to:
+        {{- range $np.kubeApiCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - {port: 6443, protocol: TCP}
+        - {port: 443, protocol: TCP}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml $np.privateCidrs | nindent 14 }}
+      ports:
+        - {port: 443, protocol: TCP}
+---
+# Dashboard (static nginx): Traefik in; no egress (/api goes Traefik → gateway directly).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "mcp-platform.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mcp-platform.selectorLabels" (list . "dashboard") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        {{- include "mcp-platform.traefikPeer" . | nindent 8 }}
+      ports:
+        - {port: 8080, protocol: TCP}
+  egress: []
+---
+# Postgres: only the gateway; no egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels:
+    {{- include "mcp-platform.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mcp-platform.selectorLabels" (list . "postgres") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mcp-platform.selectorLabels" (list . "gateway") | nindent 14 }}
+      ports:
+        - {port: 5432, protocol: TCP}
+  egress: []
+{{- end }}

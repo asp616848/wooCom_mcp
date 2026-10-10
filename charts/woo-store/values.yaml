@@ -35,6 +35,9 @@ mariadb:
     pullPolicy: IfNotPresent
   database: wordpress
   user: wordpress
+  # true = run as uid/gid 999 (mysql) with fsGroup 999, no capabilities (DESIGN §8.5). false = image default
+  # (starts as root, the entrypoint fixes ownership and drops to mysql): the fallback if a volume's ownership is wrong.
+  runAsMysqlUser: true
   persistence:
     size: 2Gi
     # Empty = cluster default StorageClass (local-path on k3s/k3d).
@@ -111,10 +114,16 @@ wooMcp:
       cpu: 200m
       memory: 192Mi
 
-# NetworkPolicies (templates added in phase P11).
+# NetworkPolicies (DESIGN §8.3): default-deny + per-component allow-lists.
 networkPolicy:
   enabled: true
+  # Namespace of the gateway (must also carry the label wmg.dev/role=platform).
   gatewayNamespace: mcp-platform
+  # Labels of the Ingress controller pods in kube-system (k3s Traefik; verified in P11).
+  traefikPodLabels:
+    app.kubernetes.io/name: traefik
+  # Excluded from "public internet" egress.
+  privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
 
 # ResourceQuota + LimitRange (templates added in phase P14).
 guardrails:

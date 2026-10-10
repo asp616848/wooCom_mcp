@@ -36,3 +36,13 @@ readOnlyRootFilesystem: true
 capabilities:
   drop: ["ALL"]
 {{- end }}
+
+{{/* NetworkPolicy peer: the Ingress controller (Traefik) pods in kube-system. */}}
+{{- define "mcp-platform.traefikPeer" -}}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: kube-system
+  podSelector:
+    matchLabels:
+      {{- toYaml .Values.networkPolicy.traefikPodLabels | nindent 6 }}
+{{- end }}

@@ -21,6 +21,11 @@ spec:
         {{- include "woo-store.labels" (list . "wordpress") | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
+      automountServiceAccountToken: false
+      # Documented exception (DESIGN §8.5): apache starts as root to bind :80, then serves as www-data (PSA baseline).
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: wordpress
           image: "{{ .Values.wordpress.image.repository }}:{{ .Values.wordpress.image.tag }}"

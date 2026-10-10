@@ -17,6 +17,17 @@ spec:
         {{- include "woo-store.labels" (list . "mariadb") | nindent 8 }}
         app.kubernetes.io/component: database
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- if .Values.mariadb.runAsMysqlUser }}
+        # DESIGN §8.5: run as the image's mysql user (999) instead of root + entrypoint gosu
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mariadb
           image: "{{ .Values.mariadb.image.repository }}:{{ .Values.mariadb.image.tag }}"
@@ -60,6 +71,12 @@ spec:
             failureThreshold: 3
           resources:
             {{- toYaml .Values.mariadb.resources | nindent 12 }}
+          {{- if .Values.mariadb.runAsMysqlUser }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/mysql
