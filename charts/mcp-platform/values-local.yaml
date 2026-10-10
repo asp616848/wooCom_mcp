@@ -2,3 +2,6 @@
 gateway:
   llm:
     model: gemini-3-flash-preview   # PLAN P10.1 rule, 2026-10-10
+networkPolicy:
+  # k3d API server endpoint (P11 VERIFY, 2026-10-10: endpointslice address 172.18.0.3, port 6443)
+  kubeApiCIDRs: [172.18.0.3/32]

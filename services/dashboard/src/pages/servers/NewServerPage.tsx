@@ -14,6 +14,7 @@ export function NewServerPage() {
   const queryClient = useQueryClient();
   const create = useMutation({
     mutationFn: (body: ServerInput) => serversApi.create(body),
+    meta: { silent: true }, // the form shows the error inline
     onSuccess: ({ server }) => {
       void queryClient.invalidateQueries({ queryKey: ['servers'] });
       if (server.status === 'connected') toast.success(`${server.name} added with ${server.toolCount} tools`);
@@ -35,6 +36,7 @@ export function NewServerPage() {
           <ServerForm
             submitLabel="Add server"
             pending={create.isPending}
+            error={create.error}
             onSubmit={(body) => create.mutate(body)}
           />
         </CardContent>

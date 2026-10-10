@@ -5,9 +5,28 @@ import { errorMessage } from '@/components/common';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { serversApi, type AuthType, type McpServer, type ServerInput, type TestResult } from '@/lib/api';
+import {
+  ApiError,
+  serversApi,
+  type AuthType,
+  type McpServer,
+  type ServerInput,
+  type TestResult,
+} from '@/lib/api';
 
 type CredentialMode = 'keep' | 'replace' | 'clear';
+
+const SSRF_HINT =
+  'Allowed: in-cluster services in mcp-upstreams, mcp-hosted or store-* namespaces, or public https URLs.';
+
+/** API errors shown inline (DESIGN §8.4): SSRF blocks get a hint about which URLs are allowed. */
+export function describeError(error: unknown): { code: string; message: string } {
+  if (error instanceof ApiError) {
+    const message = error.code === 'SSRF_BLOCKED' ? `${error.message}. ${SSRF_HINT}` : error.message;
+    return { code: error.code, message };
+  }
+  return { code: 'ERROR', message: errorMessage(error) };
+}
 
 /**
  * Create/edit form. Credentials are write-only (DESIGN §11): the API never returns them, so editing shows
@@ -17,11 +36,14 @@ export function ServerForm({
   server,
   submitLabel,
   pending,
+  error,
   onSubmit,
 }: {
   server?: McpServer;
   submitLabel: string;
   pending: boolean;
+  /** The last failed save, shown above the buttons. */
+  error?: unknown;
   onSubmit: (body: ServerInput) => void;
 }) {
   const editing = server !== undefined;
@@ -48,8 +70,10 @@ export function ServerForm({
       }),
     meta: { silent: true },
     onSuccess: setResult,
-    onError: (error) =>
-      setResult({ ok: false, era: null, toolCount: null, errorCode: 'ERROR', error: errorMessage(error) }),
+    onError: (failure) => {
+      const { code, message } = describeError(failure);
+      setResult({ ok: false, era: null, toolCount: null, errorCode: code, error: message });
+    },
   });
 
   function submit(event: FormEvent) {
@@ -174,6 +198,11 @@ export function ServerForm({
           {result.ok
             ? `Connected: ${result.toolCount} tools, ${result.era} protocol.`
             : `Failed (${result.errorCode}): ${result.error}`}
+        </p>
+      )}
+      {error !== undefined && error !== null && (
+        <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          Not saved ({describeError(error).code}): {describeError(error).message}
         </p>
       )}
       <div className="flex gap-2">

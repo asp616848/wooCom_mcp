@@ -38,6 +38,20 @@ seedServers:
     authType: header
     authHeaderName: X-Api-Key
 
+# NetworkPolicies (DESIGN §8.3): default-deny + allow-lists. Upstream namespaces are matched by their
+# wmg.dev/role label (store / upstreams / hosted), set by the Makefile and the provisioner.
+networkPolicy:
+  enabled: true
+  # Labels of the Ingress controller pods in kube-system (k3s Traefik; verified in P11).
+  traefikPodLabels:
+    app.kubernetes.io/name: traefik
+  # Kubernetes API endpoint IPs (/32 each) for the gateway's egress; set per environment (values-local / prod script):
+  # kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
+  #   -o jsonpath='{.items[0].endpoints[*].addresses[*]}'
+  kubeApiCIDRs: []
+  # Excluded from "public internet" egress.
+  privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+
 postgres:
   image:
     repository: postgres

@@ -128,3 +128,29 @@ capabilities:
 seccompProfile:
   type: RuntimeDefault
 {{- end }}
+
+{{/* NetworkPolicy egress rule: cluster DNS (kube-system pods k8s-app=kube-dns), UDP + TCP 53. */}}
+{{- define "woo-store.dnsEgress" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  ports:
+    - {port: 53, protocol: UDP}
+    - {port: 53, protocol: TCP}
+{{- end }}
+
+{{/* NetworkPolicy egress rule: public internet :80/:443, private and link-local ranges excluded. */}}
+{{- define "woo-store.publicWebEgress" -}}
+- to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+          {{- toYaml .Values.networkPolicy.privateCidrs | nindent 10 }}
+  ports:
+    - {port: 80, protocol: TCP}
+    - {port: 443, protocol: TCP}
+{{- end }}
