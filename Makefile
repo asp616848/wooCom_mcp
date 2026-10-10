@@ -28,7 +28,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
         status deps lint chart-lint typecheck mypy test test-integration images kubeconform upstreams upstreams-uninstall \
-        platform-ns seed-credentials secrets-llm platform platform-uninstall admin-password
+        platform-ns seed-credentials secrets-llm llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -86,6 +86,15 @@ secrets-llm: platform-ns ## Create Secret platform-llm from GEMINI_API_KEY in .e
 	if [ -z "$$key" ]; then echo "WARNING: GEMINI_API_KEY not set in .env - chat will be unavailable"; exit 0; fi; \
 	printf '%s' "$$key" | kubectl create secret generic platform-llm -n $(PLATFORM_NS) --from-file=api-key=/dev/stdin \
 	  --dry-run=client -o yaml | kubectl apply -f - >/dev/null && echo "platform-llm Secret updated"
+
+# GEMINI_API_KEY from .env goes into the child's environment only; recipes are silent so it is never echoed
+LLM_KEY_ENV = GEMINI_API_KEY="$$(grep -E '^GEMINI_API_KEY=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r')"
+
+llm-models: ## Show which candidate Gemini models the key in .env can use (PLAN P10.1)
+	@$(LLM_KEY_ENV) $(UV_RUN) python scripts/llm_check.py models
+
+llm-smoke: ## One function-calling round trip per candidate model; first pass wins (MODEL=... to test one)
+	@$(LLM_KEY_ENV) $(UV_RUN) python scripts/llm_check.py smoke $(if $(MODEL),--model $(MODEL))
 
 platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres (image tags from .image-tag)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }

@@ -71,6 +71,14 @@ gateway:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # Chat agent (DESIGN §12, D74): any OpenAI-compatible endpoint. The key comes from Secret platform-llm
+  # (key api-key, `make secrets-llm`); without it /api/chat answers 503. Restart the gateway after creating it.
+  llm:
+    baseUrl: https://generativelanguage.googleapis.com/v1beta/openai/
+    # Picked by the PLAN P10.1 rule on 2026-10-10 (`make llm-models`, `make llm-smoke`)
+    model: gemini-3-flash-preview
+    secretName: platform-llm
+  toolSearchThreshold: 40
   # PodDisruptionBudget (minAvailable 1); enable when replicas > 1 (prod).
   pdb:
     enabled: false

@@ -8,13 +8,13 @@ import { errorMessage } from '@/components/common';
 import { toast, Toaster } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api';
 import { AuditPage } from '@/pages/AuditPage';
+import { ChatPage } from '@/pages/ChatPage';
 import { ConnectPage } from '@/pages/ConnectPage';
 import { InvitePage } from '@/pages/InvitePage';
 import { KeysPage } from '@/pages/keys/KeysPage';
 import { Layout } from '@/pages/Layout';
 import { LoginPage } from '@/pages/Login';
 import { MembersPage } from '@/pages/MembersPage';
-import { Placeholder } from '@/pages/Placeholder';
 import { NewServerPage } from '@/pages/servers/NewServerPage';
 import { ServerDetailPage } from '@/pages/servers/ServerDetailPage';
 import { ServersPage } from '@/pages/servers/ServersPage';
@@ -51,7 +51,7 @@ const router = createBrowserRouter([
       { path: 'keys', element: <KeysPage /> },
       { path: 'audit', element: <AuditPage /> },
       { path: 'connect', element: <ConnectPage /> },
-      { path: 'chat', element: <Placeholder title="Chat" phase="P10" /> },
+      { path: 'chat', element: <ChatPage /> },
       { path: '*', element: <Navigate to="/servers" replace /> },
     ],
   },
