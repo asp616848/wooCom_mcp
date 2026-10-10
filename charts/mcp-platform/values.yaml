@@ -59,6 +59,15 @@ gateway:
     pullPolicy: IfNotPresent
   cookieSecure: false
   logLevel: info
+  # Upstream health checks by the leader replica (D36)
+  health:
+    intervalMs: 10000
+    timeoutMs: 3000
+  # Per-upstream limits (D37); a server's own timeoutMs overrides defaultToolTimeoutMs
+  upstream:
+    defaultToolTimeoutMs: 20000
+    maxInflight: 16
+    maxResultBytes: 1000000
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }

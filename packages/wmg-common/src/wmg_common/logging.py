@@ -74,6 +74,9 @@ def configure_logging(service: str, level: str = "info") -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    # Every service runs with --no-access-log (probes would flood the logs; the gateway logs its own request
+    # line). Re-enabling propagation above would undo that flag, so keep the access logger off explicitly.
+    logging.getLogger("uvicorn.access").disabled = True
     # The HTTP client logs every request URL at INFO; signed store URLs carry the consumer key and
     # signature in the query string, so keep only its warnings.
     for name in ("httpx2", "httpcore2"):

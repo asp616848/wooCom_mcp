@@ -29,6 +29,18 @@ class UserEnvelope(BaseModel):
     user: User
 
 
+def set_session_cookie(response: Response, token: str, secure: bool) -> None:
+    response.set_cookie(
+        COOKIE_NAME,
+        token,
+        max_age=int(SESSION_TTL.total_seconds()),
+        httponly=True,
+        samesite="lax",
+        secure=secure,
+        path="/",
+    )
+
+
 def _client_ip() -> str | None:
     meta = request_meta.get()
     if meta is None or meta.client_ip is None:
@@ -54,16 +66,7 @@ async def login(body: LoginBody, request: Request, response: Response, pool: Poo
         token = new_token()
         await sessions.create(conn, row["id"], token, request.headers.get("user-agent"), _client_ip())
         await users.mark_login(conn, row["id"])
-    settings = request.app.state.settings
-    response.set_cookie(
-        COOKIE_NAME,
-        token,
-        max_age=int(SESSION_TTL.total_seconds()),
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_secure,
-        path="/",
-    )
+    set_session_cookie(response, token, request.app.state.settings.cookie_secure)
     return UserEnvelope(user=users.to_user(row))
 
 

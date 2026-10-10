@@ -93,6 +93,16 @@ spec:
               value: {{ .Values.gateway.cookieSecure | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.gateway.logLevel | quote }}
+            - name: HEALTH_INTERVAL_MS
+              value: {{ .Values.gateway.health.intervalMs | int | quote }}
+            - name: HEALTH_TIMEOUT_MS
+              value: {{ .Values.gateway.health.timeoutMs | int | quote }}
+            - name: DEFAULT_TOOL_TIMEOUT_MS
+              value: {{ .Values.gateway.upstream.defaultToolTimeoutMs | int | quote }}
+            - name: UPSTREAM_MAX_INFLIGHT
+              value: {{ .Values.gateway.upstream.maxInflight | int | quote }}
+            - name: MAX_RESULT_BYTES
+              value: {{ .Values.gateway.upstream.maxResultBytes | int | quote }}
           lifecycle:
             # let Traefik drop the endpoint before uvicorn stops accepting connections
             preStop:

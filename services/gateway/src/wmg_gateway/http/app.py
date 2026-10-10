@@ -1,6 +1,7 @@
-"""FastAPI app factory: lifespan, health, metrics, /api routers, error handling (DESIGN §5.3).
+"""FastAPI app factory: lifespan, health, metrics, /api routers, the MCP mount, error handling (DESIGN §5.3).
 
-The MCP endpoints (`/mcp/search` route + `/` mount, last) are added in P8.
+Lifespan order (§5.1): db pool → migrations + bootstrap → catalog → MCP session manager → LISTEN task →
+leader task (health loop) → serve → shutdown in reverse.
 """
 
 import time
@@ -8,8 +9,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from mcp.server.subscriptions import ToolsListChanged
 from prometheus_client import make_asgi_app
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
@@ -20,11 +23,15 @@ from wmg_common.logging import get_logger
 from wmg_gateway.bootstrap import bootstrap
 from wmg_gateway.db.migrate import migrate
 from wmg_gateway.db.pool import create_pool
-from wmg_gateway.http.api import auth
+from wmg_gateway.events.bus import EventListener
+from wmg_gateway.http.api import auth, invites, keys, servers, users
 from wmg_gateway.http.deps import csrf_check
+from wmg_gateway.leader import Leader
+from wmg_gateway.mcp.servers import build_full_server
 from wmg_gateway.request_context import RequestContextMiddleware
-from wmg_gateway.security.crypto import CredentialCipher
+from wmg_gateway.runtime import Runtime
 from wmg_gateway.settings import Settings
+from wmg_gateway.upstream.health import HealthChecker
 
 log = get_logger(__name__)
 
@@ -80,27 +87,53 @@ class Readiness:
         return self._ok
 
 
-def create_app(settings: Settings) -> FastAPI:
+def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
     readiness = Readiness()
+    rt = Runtime.create(settings)
+    mcp_server, mcp_app = build_full_server(rt)
+
+    async def on_catalog_event() -> None:
+        if await rt.catalog.reload(rt.pool):
+            await rt.bus.publish(ToolsListChanged())
+
+    async def leader_duties() -> None:
+        checker = HealthChecker(
+            rt.pool,
+            rt.manager,
+            rt.catalog,
+            settings.health_interval_ms / 1000,
+            settings.health_timeout_ms / 1000,
+        )
+        await checker.run_forever()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        cipher = CredentialCipher(settings.encryption_key())
-        pool = await create_pool(
-            settings.database_url.get_secret_value(), settings.db_pool_min, settings.db_pool_max
-        )
+        dsn = settings.database_url.get_secret_value()
+        pool = await create_pool(dsn, settings.db_pool_min, settings.db_pool_max)
+        rt.attach_pool(pool)
         app.state.pool = pool
-        app.state.cipher = cipher
         try:
-            await migrate(pool, after=lambda conn: bootstrap(conn, settings, cipher))
-            readiness.migrated = True
-            log.info("gateway started")
-            yield
+            await migrate(pool, after=lambda conn: bootstrap(conn, settings, rt.cipher))
+            await rt.catalog.reload(pool)
+            async with mcp_server.session_manager.run(), anyio.create_task_group() as tg:
+                await tg.start(EventListener(dsn, on_catalog_event).run)
+                leader = Leader(dsn, leader_duties)
+                app.state.leader = leader
+                if run_leader:
+                    tg.start_soon(leader.run)
+                readiness.migrated = True
+                log.info("gateway started", servers=len(rt.catalog.current.servers))
+                try:
+                    yield
+                finally:
+                    tg.cancel_scope.cancel()
         finally:
+            await rt.manager.aclose()
             await pool.close()
 
     app = FastAPI(title="Woo MCP Gateway", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
+    app.state.runtime = rt
 
     @app.get("/livez", include_in_schema=False)
     async def livez() -> dict[str, str]:
@@ -115,7 +148,14 @@ def create_app(settings: Settings) -> FastAPI:
     app.mount("/metrics", make_asgi_app())
 
     api = APIRouter(prefix="/api", dependencies=[Depends(csrf_check)])
-    api.include_router(auth.router)
+    for module in (auth, users, invites, keys, servers):
+        api.include_router(module.router)
+
+    # Without this, unknown /api paths would fall through to the MCP mount and get its plain-text 404.
+    @api.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+    async def api_not_found(path: str) -> Response:
+        return error_response(404, "NOT_FOUND", "Not found")
+
     app.include_router(api)
 
     @app.exception_handler(AppError)
@@ -140,6 +180,9 @@ def create_app(settings: Settings) -> FastAPI:
     async def unhandled(_request: Request, exc: Exception) -> Response:
         log.error("unhandled error", error=type(exc).__name__, exc_info=exc)
         return error_response(500, "INTERNAL", "Internal error")
+
+    # Last: serves /mcp (the SDK app routes only its own path; anything else is 404 from it).
+    app.mount("/", mcp_app)
 
     app.add_middleware(ApiBodyLimitMiddleware)
     app.add_middleware(RequestContextMiddleware)
