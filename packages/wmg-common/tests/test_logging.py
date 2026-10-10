@@ -59,3 +59,12 @@ def test_http_client_request_urls_not_logged(capsys: pytest.CaptureFixture[str])
     out = capsys.readouterr().out
     assert "oauth_signature" not in out
     assert "pool exhausted" in out
+
+
+def test_uvicorn_access_log_stays_off(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging("unit-test", "info")
+    logging.getLogger("uvicorn.access").info('10.0.0.1:1 - "GET /readyz HTTP/1.1" 200')
+    logging.getLogger("uvicorn.error").info("Application startup complete.")
+    out = capsys.readouterr().out
+    assert "/readyz" not in out
+    assert "startup complete" in out

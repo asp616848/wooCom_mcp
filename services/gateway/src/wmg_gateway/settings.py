@@ -1,6 +1,6 @@
 """Gateway configuration from env (DESIGN §5.2). Invalid env → the process exits with a readable message.
 
-Settings for later phases (health/timeouts P8, LLM P10, provisioning P14) are added with those phases.
+Settings for later phases (LLM P10, provisioning P14) are added with those phases.
 """
 
 import base64
@@ -37,6 +37,14 @@ class Settings(ServiceSettings):
     seed_credentials_dir: Path = Path("/seed-credentials")
 
     cookie_secure: bool = False
+
+    # P8: upstream health, timeouts and limits (DESIGN §5.2, D36, D37)
+    health_interval_ms: int = Field(default=10000, ge=1000, le=300000)
+    health_timeout_ms: int = Field(default=3000, ge=500, le=60000)
+    default_tool_timeout_ms: int = Field(default=20000, ge=1000, le=120000)
+    upstream_max_inflight: int = Field(default=16, ge=1, le=256)
+    max_result_bytes: int = Field(default=1_000_000, ge=1024)
+    rate_limit_per_min: int = Field(default=0, ge=0)
 
     @field_validator("credential_encryption_key")
     @classmethod
