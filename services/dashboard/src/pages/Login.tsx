@@ -16,6 +16,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const login = useMutation({
     mutationFn: () => authApi.login(email, password),
+    meta: { silent: true },
     onSuccess: ({ user }) => {
       queryClient.setQueryData(['me'], user);
       navigate('/servers', { replace: true });
