@@ -293,6 +293,7 @@ def gateway_factory(
             "seed_credentials_dir": tmp_path / "creds",
             "health_interval_ms": 1000,
             "health_timeout_ms": 2000,
+            "port": free_port(),  # the chat agent dials 127.0.0.1:<PORT>/mcp, so it must be the real port
             **overrides,
         }
         settings = Settings(**values)
@@ -300,9 +301,24 @@ def gateway_factory(
         rt = app.state.runtime
         rt.check_url = _allow_any_url
         rt.manager = UpstreamManager(rt.cipher, settings.upstream_max_inflight, httpx2.AsyncHTTPTransport)
-        server = ThreadServer(app).start()
+        server = ThreadServer(app, port=settings.port).start()
         started.append(server)
         return Gateway(server=server, app=app)
+
+    yield make
+    for server in started:
+        server.stop()
+
+
+@pytest.fixture
+def serve() -> Iterator[Callable[[ASGIApp], ThreadServer]]:
+    """Start any ASGI app on loopback for the test (e.g. a scripted LLM); stopped afterwards."""
+    started: list[ThreadServer] = []
+
+    def make(app: ASGIApp) -> ThreadServer:
+        server = ThreadServer(app).start()
+        started.append(server)
+        return server
 
     yield make
     for server in started:

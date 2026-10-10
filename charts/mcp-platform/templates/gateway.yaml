@@ -103,6 +103,15 @@ spec:
               value: {{ .Values.gateway.upstream.maxInflight | int | quote }}
             - name: MAX_RESULT_BYTES
               value: {{ .Values.gateway.upstream.maxResultBytes | int | quote }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.gateway.llm.baseUrl | quote }}
+            - name: LLM_MODEL
+              value: {{ .Values.gateway.llm.model | quote }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.llm.secretName }}, key: api-key, optional: true }
+            - name: TOOL_SEARCH_THRESHOLD
+              value: {{ .Values.gateway.toolSearchThreshold | int | quote }}
           lifecycle:
             # let Traefik drop the endpoint before uvicorn stops accepting connections
             preStop:

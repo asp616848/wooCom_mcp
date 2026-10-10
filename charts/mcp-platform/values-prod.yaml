@@ -26,3 +26,5 @@ gateway:
     limits: { cpu: "1", memory: 512Mi }
   pdb:
     enabled: true
+  llm:
+    model: gemini-3-flash-preview   # PLAN P10.1 rule, 2026-10-10

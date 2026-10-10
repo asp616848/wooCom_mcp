@@ -1,6 +1,6 @@
 """Gateway configuration from env (DESIGN §5.2). Invalid env → the process exits with a readable message.
 
-Settings for later phases (LLM P10, provisioning P14) are added with those phases.
+Settings for later phases (provisioning P14) are added with those phases.
 """
 
 import base64
@@ -46,6 +46,12 @@ class Settings(ServiceSettings):
     max_result_bytes: int = Field(default=1_000_000, ge=1024)
     rate_limit_per_min: int = Field(default=0, ge=0)
 
+    # P10: chat agent (DESIGN §12, D74). No key → POST /api/chat answers 503 (run `make secrets-llm`).
+    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    llm_model: str = "gemini-3-flash-preview"
+    llm_api_key: SecretStr | None = None
+    tool_search_threshold: int = Field(default=40, ge=1)
+
     @field_validator("credential_encryption_key")
     @classmethod
     def _key_is_32_bytes(cls, value: SecretStr) -> SecretStr:
@@ -59,6 +65,10 @@ class Settings(ServiceSettings):
 
     def encryption_key(self) -> bytes:
         return base64.b64decode(self.credential_encryption_key.get_secret_value())
+
+    def llm_key(self) -> str | None:
+        key = self.llm_api_key.get_secret_value().strip() if self.llm_api_key else ""
+        return key or None
 
     def host_list(self) -> list[str]:
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]

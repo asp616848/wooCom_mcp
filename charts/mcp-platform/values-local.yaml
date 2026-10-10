@@ -1,2 +1,4 @@
 # Local (k3d) overrides. Defaults in values.yaml already target local.
-{}
+gateway:
+  llm:
+    model: gemini-3-flash-preview   # PLAN P10.1 rule, 2026-10-10
