@@ -42,6 +42,11 @@ strict = true
 python_version = "3.14"
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+# asyncpg ships no type information; our repos wrap it with explicit types
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
 testpaths = ["packages", "services"]

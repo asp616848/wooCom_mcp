@@ -1,0 +1,42 @@
+# Narrow rights for the gateway (DESIGN §8.6): only its own namespace; used from P14 (deployer Jobs).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wmg-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: wmg-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wmg-gateway
+  labels:
+    {{- include "mcp-platform.labels" (list . "gateway") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: wmg-gateway
+subjects:
+  - kind: ServiceAccount
+    name: wmg-gateway
+    namespace: {{ .Release.Namespace }}
