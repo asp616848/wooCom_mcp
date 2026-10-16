@@ -113,11 +113,12 @@ as the signed-in user with credential type `chat_agent`.
 | `make status`, `make admin-password`, `make store-admin-password` | inspect |
 | `make lint`, `make typecheck`, `make test`, `make test-integration` | checks (integration tests start Postgres in Docker) |
 | `make e2e` | acceptance + isolation tests against the running cluster |
+| `make vps-bootstrap`, `make prod-up`, `make vps-tunnel` | VPS: k3s + cert-manager, deploy everything with prod values, reopen the API tunnel |
 | `make test-k8s`, `make verify-k8s` | network/PSA/RBAC/SSRF checks; every workload has requests, limits and probes |
 
 ## Production-like setup (VPS, k3s)
 Same charts, different values (`values-prod.yaml`): real domains with TLS from cert-manager, `local-path` storage,
-pre-created Secrets, two gateway replicas. Step-by-step instructions arrive with the VPS deployment.
+pre-created Secrets, two gateway replicas, multi-arch images from GHCR. Step by step: [docs/vps-deploy.md](docs/vps-deploy.md).
 
 ## Repository layout
 | Path | Contents |

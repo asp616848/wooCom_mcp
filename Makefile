@@ -22,13 +22,42 @@ SERVER_CHART := charts/mcp-server
 PLATFORM_NS  := mcp-platform
 PLATFORM_CHART := charts/mcp-platform
 # seed slug  <-  namespace/secret/key holding that upstream's credential
+# Image repositories: local k3d imports are wmg/<svc>; prod pulls ghcr.io/<GH_OWNER>/wmg-<svc> (D20)
+IMAGE_PREFIX ?= wmg/
+
+# ENV=prod (DESIGN §17): the VPS over the SSH tunnel; settings from .env.prod; only Helm values differ.
+envprod = $(shell grep -E '^$(1)=' .env.prod 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r')
+VPS_IP      ?= $(call envprod,VPS_IP)
+GH_OWNER    ?= $(call envprod,GH_OWNER)
+BASE_DOMAIN ?= $(subst .,-,$(VPS_IP)).sslip.io
+CERT_ISSUER ?= letsencrypt-prod
+VPS_KUBECONFIG := $(HOME)/.kube/wmg-vps.yaml
+SSH_KEY     ?= $(HOME)/.ssh/wmg_oci
+ISSUER_SET   = --set-string ingress.annotations.cert-manager\.io/cluster-issuer=$(CERT_ISSUER)
+STORE_ENV_SET :=
+UPSTREAM_ENV_SET :=
+PLATFORM_ENV_SET :=
+ifeq ($(ENV),prod)
+export KUBECONFIG := $(VPS_KUBECONFIG)
+IMAGE_PREFIX := ghcr.io/$(GH_OWNER)/wmg-
+# release.yml tags images with the short sha of the commit it built; override with IMAGE_TAG=<sha>
+IMAGE_TAG    = $(shell git rev-parse --short HEAD)
+KUBE_API_IP  = $(shell kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
+                 -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
+STORE_ENV_SET = --set-string store.host=shop.$(BASE_DOMAIN) --set-string existingSecret=$(STORE)-store-credentials \
+                $(ISSUER_SET)
+UPSTREAM_ENV_SET = --set-string auth.existingSecret=$$name-mcp-auth
+PLATFORM_ENV_SET = --set-string hosts.dashboard=dashboard.$(BASE_DOMAIN) --set-string hosts.gateway=gateway.$(BASE_DOMAIN) \
+                   --set 'networkPolicy.kubeApiCIDRs={$(KUBE_API_IP)/32}' $(ISSUER_SET)
+endif
+
 SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 gst=$(UPSTREAMS_NS)/gst-mcp-auth/token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
         status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e verify-k8s images kubeconform upstreams upstreams-uninstall \
-        platform-ns seed-credentials secrets-llm llm-models llm-smoke platform platform-uninstall admin-password
+        platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -54,18 +83,20 @@ store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag fro
 	@# D22: the apache WordPress image needs root to bind :80, so stores run under PSA baseline (not restricted)
 	@kubectl label --overwrite namespace $(STORE_NS) wmg.dev/role=store pod-security.kubernetes.io/enforce=baseline >/dev/null
 	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) \
-	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.tag=$(IMAGE_TAG) --wait --timeout 10m
+	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.repository=$(IMAGE_PREFIX)woo-mcp \
+	  --set-string wooMcp.image.tag=$(IMAGE_TAG) $(STORE_ENV_SET) --wait --timeout 10m
 
 upstreams: ## Install/upgrade gst (bearer) + pincode (X-Api-Key) in mcp-upstreams (image tag from .image-tag)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
 	kubectl create namespace $(UPSTREAMS_NS) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl label --overwrite namespace $(UPSTREAMS_NS) wmg.dev/role=upstreams pod-security.kubernetes.io/enforce=restricted
-	helm upgrade --install gst $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
-	  --set image.repository=wmg/mcp-gst --set-string image.tag=$(IMAGE_TAG) --set auth.type=bearer --set size=small \
-	  --set networkPolicy.allowInternet=false --wait --timeout 3m
-	helm upgrade --install pincode $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
-	  --set image.repository=wmg/mcp-pincode --set-string image.tag=$(IMAGE_TAG) --set auth.type=header \
-	  --set auth.headerName=X-Api-Key --set size=small --set networkPolicy.allowInternet=false --wait --timeout 3m
+	name=gst; helm upgrade --install gst $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
+	  --set image.repository=$(IMAGE_PREFIX)mcp-gst --set-string image.tag=$(IMAGE_TAG) --set auth.type=bearer --set size=small \
+	  --set networkPolicy.allowInternet=false $(UPSTREAM_ENV_SET) --wait --timeout 3m
+	name=pincode; helm upgrade --install pincode $(SERVER_CHART) -n $(UPSTREAMS_NS) -f $(SERVER_CHART)/values-$(ENV).yaml \
+	  --set image.repository=$(IMAGE_PREFIX)mcp-pincode --set-string image.tag=$(IMAGE_TAG) --set auth.type=header \
+	  --set auth.headerName=X-Api-Key --set size=small --set networkPolicy.allowInternet=false $(UPSTREAM_ENV_SET) \
+	  --wait --timeout 3m
 
 upstreams-uninstall: ## Uninstall gst + pincode (credential Secrets are kept)
 	-helm uninstall gst -n $(UPSTREAMS_NS)
@@ -102,7 +133,9 @@ llm-smoke: ## One function-calling round trip per candidate model; first pass wi
 platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres (image tags from .image-tag)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
 	helm upgrade --install platform $(PLATFORM_CHART) -n $(PLATFORM_NS) -f $(PLATFORM_CHART)/values-$(ENV).yaml \
-	  --set-string gateway.image.tag=$(IMAGE_TAG) --set-string dashboard.image.tag=$(IMAGE_TAG) --wait --timeout 5m
+	  --set-string gateway.image.repository=$(IMAGE_PREFIX)gateway --set-string gateway.image.tag=$(IMAGE_TAG) \
+	  --set-string dashboard.image.repository=$(IMAGE_PREFIX)dashboard --set-string dashboard.image.tag=$(IMAGE_TAG) \
+	  $(PLATFORM_ENV_SET) --wait --timeout 5m
 
 platform-uninstall: ## Uninstall the platform release (Postgres PVC and Secrets are kept)
 	-helm uninstall platform -n $(PLATFORM_NS)
@@ -191,3 +224,25 @@ kubeconform: ## Validate rendered charts (local + prod values) against Kubernete
 	    helm template kc $$c -f $$c/values-$$e.yaml $(CHART_CHECK_SET) | kubeconform -strict -summary -ignore-missing-schemas || exit 1; \
 	  fi; \
 	done; done
+
+# ---------------------------------------------------------------------------------------------- VPS (P13)
+
+vps-bootstrap: ## VPS: firewall, k3s, kubeconfig (~/.kube/wmg-vps.yaml), tunnel, cert-manager + issuers (VPS_IP from .env.prod)
+	@test -n "$(VPS_IP)" || { echo "Set VPS_IP in .env.prod"; exit 1; }
+	SSH_KEY=$(SSH_KEY) deploy/k3s/vps-bootstrap.sh $(VPS_IP)
+
+vps-tunnel: ## VPS: (re)open the SSH tunnel localhost:16443 -> VPS API (6443 is never public)
+	@nc -z 127.0.0.1 16443 2>/dev/null && echo "tunnel already open" || \
+	  ssh -i $(SSH_KEY) -f -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 16443:127.0.0.1:6443 ubuntu@$(VPS_IP)
+
+vps-ssh: ## VPS: SSH shell
+	ssh -i $(SSH_KEY) ubuntu@$(VPS_IP)
+
+prod-secrets: ## VPS: create namespaces + Secrets once (scripts/prod-secrets.sh; values never printed)
+	KUBECONFIG=$(VPS_KUBECONFIG) scripts/prod-secrets.sh .env.prod
+
+prod-acme-netpol: ## VPS: let Traefik reach cert-manager HTTP-01 solver pods in the store and platform namespaces
+	@for n in $(STORE_NS) $(PLATFORM_NS); do KUBECONFIG=$(VPS_KUBECONFIG) kubectl apply -n $$n -f deploy/k3s/acme-solver-netpol.yaml; done
+
+prod-up: ## VPS: secrets, upstreams, store, credentials, platform from GHCR images (IMAGE_TAG=<sha>, CERT_ISSUER=letsencrypt-staging to test)
+	$(MAKE) ENV=prod prod-secrets prod-acme-netpol upstreams store seed-credentials platform

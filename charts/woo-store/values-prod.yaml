@@ -1,20 +1,19 @@
 # Production-like (VPS / k3s) overrides.
 
 store:
-  host: shop.example.com # replace with your real domain
+  host: shop.example.com # `make ENV=prod` sets shop.<ip-dashed>.sslip.io from VPS_IP in .env.prod
   scheme: https
 
 ingress:
   annotations:
-    # Requires cert-manager + a ClusterIssuer named letsencrypt (stand-out item, optional).
-    cert-manager.io/cluster-issuer: letsencrypt
+    # cert-manager ClusterIssuers from deploy/k3s/cluster-issuers.yaml; `CERT_ISSUER=letsencrypt-staging` to test.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
   tls:
     enabled: true
     secretName: shop-tls
 
-# In production, create the Secret yourself (kubectl / sealed-secrets / external-secrets)
-# instead of letting the chart generate it.
-# existingSecret: main-store-credentials
+# Created beforehand by scripts/prod-secrets.sh (`make prod-secrets`); the Makefile passes <store>-store-credentials.
+existingSecret: main-store-credentials
 
 mariadb:
   persistence:

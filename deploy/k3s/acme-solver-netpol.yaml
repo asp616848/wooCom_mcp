@@ -1,0 +1,22 @@
+# cert-manager's HTTP-01 solver pods run in the namespace of each Ingress. Our charts default-deny ingress there,
+# so Traefik could not reach them. Applied per namespace by `make prod-acme-netpol` (deploy-side, not a chart change).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-acme-http01-solver
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8089
+          protocol: TCP

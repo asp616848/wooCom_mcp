@@ -1,0 +1,30 @@
+# Let's Encrypt via HTTP-01 through the k3s Traefik Ingress (DESIGN §17). Try staging first (no rate limits,
+# untrusted certs), then switch the Ingress annotation to letsencrypt-prod (`CERT_ISSUER=letsencrypt-prod`).
+# No email: Let's Encrypt no longer sends expiry mail, and the account needs none.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik

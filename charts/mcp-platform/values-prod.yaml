@@ -1,5 +1,5 @@
-# Production-like (VPS / k3s) overrides (DESIGN §17). Hosts are replaced by the deploy script
-# (<label>.<ip-dashed>.sslip.io); secrets come from scripts/prod-secrets.sh.
+# Production-like (VPS / k3s) overrides (DESIGN §17). `make ENV=prod platform` sets the hosts
+# (<label>.<ip-dashed>.sslip.io), image repositories (GHCR) and kubeApiCIDRs; secrets come from scripts/prod-secrets.sh.
 hosts:
   dashboard: dashboard.example.com
   gateway: gateway.example.com
