@@ -8,6 +8,7 @@ Passwords and keys are generated here and never printed.
 
 import base64
 import json
+import os
 import secrets
 import subprocess
 import time
@@ -23,9 +24,13 @@ from mcp.client.streamable_http import streamable_http_client
 
 pytestmark = pytest.mark.e2e
 
-DASHBOARD = "http://dashboard.localhost"
-MCP_URL = "http://gateway.localhost/mcp"
-STORE_API = "http://shop.localhost/wp-json/wc/store/v1"
+# Local by default; against the VPS: E2E_SCHEME=https E2E_DOMAIN=137-23-40-25.sslip.io (and KUBECONFIG=...)
+SCHEME = os.environ.get("E2E_SCHEME", "http")
+DOMAIN = os.environ.get("E2E_DOMAIN", "localhost")
+DASHBOARD = f"{SCHEME}://dashboard.{DOMAIN}"
+MCP_URL = f"{SCHEME}://gateway.{DOMAIN}/mcp"
+SHOP = f"{SCHEME}://shop.{DOMAIN}"
+STORE_API = f"{SHOP}/wp-json/wc/store/v1"
 CSRF = {"X-WMG-CSRF": "1"}
 POSTCODE = "560001"  # Bengaluru (KA); the store ships from Maharashtra → other_state, 4 days
 SHIPPING = {
@@ -273,7 +278,7 @@ def test_04_AT_C1_chat_creates_product(world: World) -> None:
     result = next(d for k, d in events if k == "tool_result" and d["name"] == "woo-main__create_product")
     assert result["ok"], result
     search = {"s": name, "post_type": "product"}
-    page = httpx2.get("http://shop.localhost/", params=search, follow_redirects=True)
+    page = httpx2.get(f"{SHOP}/", params=search, follow_redirects=True)
     assert name in page.text
     with httpx2.Client(timeout=30) as http:
         found = http.get(f"{STORE_API}/products", params={"search": name}).json()

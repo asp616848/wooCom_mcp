@@ -33,7 +33,7 @@ BASE_DOMAIN ?= $(subst .,-,$(VPS_IP)).sslip.io
 CERT_ISSUER ?= letsencrypt-prod
 VPS_KUBECONFIG := $(HOME)/.kube/wmg-vps.yaml
 SSH_KEY     ?= $(HOME)/.ssh/wmg_oci
-ISSUER_SET   = --set-string ingress.annotations.cert-manager\.io/cluster-issuer=$(CERT_ISSUER)
+ISSUER_SET   = --set-string 'ingress.annotations.cert-manager\.io/cluster-issuer=$(CERT_ISSUER)'
 STORE_ENV_SET :=
 UPSTREAM_ENV_SET :=
 PLATFORM_ENV_SET :=
@@ -42,7 +42,7 @@ export KUBECONFIG := $(VPS_KUBECONFIG)
 IMAGE_PREFIX := ghcr.io/$(GH_OWNER)/wmg-
 # release.yml tags images with the short sha of the commit it built; override with IMAGE_TAG=<sha>
 IMAGE_TAG    = $(shell git rev-parse --short HEAD)
-KUBE_API_IP  = $(shell kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
+KUBE_API_IP  = $(shell KUBECONFIG=$(VPS_KUBECONFIG) kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
                  -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
 STORE_ENV_SET = --set-string store.host=shop.$(BASE_DOMAIN) --set-string existingSecret=$(STORE)-store-credentials \
                 $(ISSUER_SET)
