@@ -55,6 +55,12 @@ cp .env.prod.example .env.prod      # VPS_IP, GH_OWNER, GEMINI_API_KEY (optional
 5. **Sign in.** Dashboard admin password:
    `KUBECONFIG=~/.kube/wmg-vps.yaml make admin-password`.
 
+## Test the deployment
+```bash
+KUBECONFIG=~/.kube/wmg-vps.yaml E2E_SCHEME=https E2E_DOMAIN=<ip-dashed>.sslip.io make e2e
+```
+Runs the acceptance and isolation suite against the VPS over HTTPS. Chat tests need a Gemini key with credit.
+
 ## Day 2
 | Task | Command |
 |---|---|

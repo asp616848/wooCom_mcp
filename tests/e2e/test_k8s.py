@@ -7,6 +7,7 @@ from the same kind of probe, so a broken probe can't pass as isolation. Run: `ma
 
 import base64
 import json
+import os
 import re
 import subprocess
 import time
@@ -20,7 +21,10 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 CURL_IMAGE = "curlimages/curl:8.22.0"
-DASHBOARD = "http://dashboard.localhost"
+SCHEME = os.environ.get("E2E_SCHEME", "http")
+DOMAIN = os.environ.get("E2E_DOMAIN", "localhost")
+DASHBOARD = f"{SCHEME}://dashboard.{DOMAIN}"
+SHOP = f"{SCHEME}://shop.{DOMAIN}"
 GATEWAY_SA = "system:serviceaccount:mcp-platform:wmg-gateway"
 # Pod-level settings that satisfy PSA "restricted" (the curl image's user is uid 100).
 RESTRICTED = {
@@ -97,11 +101,11 @@ def woo_mcp_labels() -> dict[str, str]:
 
 
 def test_K01_storefront_public() -> None:
-    assert httpx2.get("http://shop.localhost/", timeout=10).status_code in (200, 302)
+    assert httpx2.get(f"{SHOP}/", timeout=10).status_code in (200, 302)
 
 
 def test_K02_woo_mcp_has_no_ingress_route() -> None:
-    assert httpx2.post("http://shop.localhost/mcp", json={}, timeout=10).status_code == 404
+    assert httpx2.post(f"{SHOP}/mcp", json={}, timeout=10).status_code == 404
     rules = json.loads(kubectl("get", "ingress", "-A", "-o", "json").stdout)
     backends = [
         p["backend"]["service"]["name"]
