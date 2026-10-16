@@ -27,13 +27,13 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck mypy test test-integration test-k8s images kubeconform upstreams upstreams-uninstall \
+        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e verify-k8s images kubeconform upstreams upstreams-uninstall \
         platform-ns seed-credentials secrets-llm llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
 
-up: cluster images upstreams store seed-credentials platform ## Create cluster (if missing), build images, install everything
+up: cluster images upstreams store seed-credentials secrets-llm platform ## Create cluster (if missing), build images, install everything (chat needs GEMINI_API_KEY in .env)
 
 down: platform-uninstall store-uninstall upstreams-uninstall ## Uninstall releases (keeps cluster, data and Secrets)
 
@@ -153,6 +153,22 @@ test: ## Unit tests: pytest (and vitest once the dashboard exists)
 
 test-integration: ## Integration tests (needs Docker: starts postgres:17.11-alpine3.24 on localhost:55432)
 	$(UV_RUN) pytest -m integration
+
+e2e: ## DoD acceptance suite + isolation checks against the running cluster (TESTING §4, §5; make up first)
+	$(UV_RUN) pytest tests/e2e -m e2e -v --durations=0
+
+# Deployments/StatefulSets: requests, limits, liveness, readiness. Jobs run to completion: requests + limits only.
+VERIFY_JQ := '[.items[] | select(.metadata.namespace | test("^(store-|mcp-)")) | .kind as $$k \
+  | "\(.kind) \(.metadata.namespace)/\(.metadata.name)" as $$w | .spec.template.spec.containers[] \
+  | {w: "\($$w) [\(.name)]", missing: ([ (if .resources.requests == null then "requests" else empty end), \
+      (if .resources.limits == null then "limits" else empty end), \
+      (if $$k != "Job" and .livenessProbe == null then "liveness" else empty end), \
+      (if $$k != "Job" and .readinessProbe == null then "readiness" else empty end) ])}] \
+  | (.[] | "\(if (.missing | length) == 0 then "ok  " else "FAIL" end) \(.w)\(if (.missing | length) > 0 then " missing: \(.missing | join(", "))" else "" end)"), \
+    (if all(.[]; (.missing | length) == 0) then "verify-k8s: all workloads OK" else error("verify-k8s: workloads above are missing settings") end)'
+
+verify-k8s: ## Every store/platform workload container has requests, limits and probes (Jobs: requests + limits)
+	@kubectl get deploy,statefulset,job -A -o json | jq -r $(VERIFY_JQ)
 
 test-k8s: ## Network isolation, PSA, RBAC and live SSRF checks against the running cluster (TESTING §4)
 	$(UV_RUN) pytest tests/e2e/test_k8s.py -m e2e
