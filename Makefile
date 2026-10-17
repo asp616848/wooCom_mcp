@@ -65,7 +65,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e verify-k8s images kubeconform upstreams upstreams-uninstall \
+        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e e2e-scale perf verify-k8s images kubeconform upstreams upstreams-uninstall \
         e2e-stores e2e-hosted platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
@@ -145,10 +145,11 @@ llm-models: ## Show which candidate Gemini models the key in .env can use (PLAN 
 llm-smoke: ## One function-calling round trip per candidate model; first pass wins (MODEL=... to test one)
 	@$(LLM_KEY_ENV) $(UV_RUN) python scripts/llm_check.py smoke $(if $(MODEL),--model $(MODEL))
 
-platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres + store provisioning (image tags from .image-tag)
+platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres + store provisioning (image tags from .image-tag; SCALE=1: 2 gateways + PDB)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
 	@test -n "$(KUBE_API_IP)" || { echo "Could not look up the Kubernetes API address"; exit 1; }
 	helm upgrade --install platform $(PLATFORM_CHART) -n $(PLATFORM_NS) -f $(PLATFORM_CHART)/values-$(ENV).yaml \
+	  $(if $(SCALE),-f $(PLATFORM_CHART)/values-scale.yaml) \
 	  --set-string gateway.image.repository=$(IMAGE_PREFIX)gateway --set-string gateway.image.tag=$(IMAGE_TAG) \
 	  --set-string dashboard.image.repository=$(IMAGE_PREFIX)dashboard --set-string dashboard.image.tag=$(IMAGE_TAG) \
 	  --set-string provisioning.deployerImage.repository=$(IMAGE_PREFIX)deployer \
@@ -215,6 +216,12 @@ e2e-stores: ## Bonus store provisioning B-01..B-07 against the running cluster (
 
 e2e-hosted: ## SO-5 hosted MCP server SO5-01 against the running cluster (TESTING §6; ~3 min, deploys pincode-hosted)
 	$(UV_RUN) pytest tests/e2e/test_hosted.py -m bonus -v --durations=0
+
+e2e-scale: ## SO-7 two replicas: NFR-P1/P2 in-cluster, leader kills under load, PDB, rate limit (`make platform SCALE=1` first; ~4 min)
+	$(UV_RUN) pytest tests/e2e/test_scale.py -m bonus -v -rP --durations=0
+
+perf: ## TESTING §7 autocannon run through the ingress (PERF_AUTH='Authorization=Bearer <key>' RUN=list|call)
+	tests/perf/run.sh $(or $(RUN),list) 30 0 | tail -1
 
 # Deployments/StatefulSets: requests, limits, liveness, readiness. Jobs run to completion: requests + limits only.
 VERIFY_JQ := '[.items[] | select(.metadata.namespace | test("^(store-|mcp-)")) | .kind as $$k \

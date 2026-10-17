@@ -1,0 +1,6 @@
+# SO-7 scale profile for the local cluster (D95): two gateway replicas + PodDisruptionBudget, like prod.
+# `make platform SCALE=1` layers it on values-local.yaml; the default local install keeps one replica to save memory.
+gateway:
+  replicas: 2
+  pdb:
+    enabled: true
