@@ -118,6 +118,13 @@ provisioning:
   maxStoresTotal: 4
   provisionTimeoutS: 900
 
+# SO-5 hosted MCP servers (DESIGN §14, D94), on when provisioning is. Namespace created by `make platform`.
+hosted:
+  namespace: mcp-hosted
+  # an admin may only deploy images whose name starts with one of these
+  allowedImagePrefixes: ["wmg/", "ghcr.io/", "docker.io/"]
+  quota: { requestsCpu: "1", requestsMemory: 1Gi, limitsCpu: "2", limitsMemory: 2Gi, pods: 10 }
+
 dashboard:
   image:
     repository: wmg/dashboard

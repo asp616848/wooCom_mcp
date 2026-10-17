@@ -7,14 +7,13 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from typing import Any
 
 import httpx2
 import pytest
 
 from wmg_gateway.db.pool import create_pool
-from wmg_gateway.provisioner.k8s import JobInfo, K8sError, del_job_name, prov_job_name
+from wmg_gateway.provisioner.k8s import K8sError, del_job_name, prov_job_name
 from wmg_gateway.provisioner.stores import StoreReconciler
 
 pytestmark = [pytest.mark.anyio, pytest.mark.integration]
@@ -22,47 +21,6 @@ pytestmark = [pytest.mark.anyio, pytest.mark.integration]
 CSRF = {"X-WMG-CSRF": "1"}
 ADMIN = {"email": "admin@example.com", "password": "admin-password-123"}
 PROVISIONING = {"deployer_image": "wmg/deployer:t", "woo_mcp_image": "wmg/woo-mcp:t"}
-
-
-class FakeJobs:
-    """In-memory JobApi: Jobs start 'running'; tests finish them with `finish()`."""
-
-    def __init__(self) -> None:
-        self.jobs: dict[str, JobInfo] = {}
-        self.created: list[str] = []
-        self.deleted: list[str] = []
-        self.secrets: dict[str, dict[str, str]] = {}
-        self.logs: dict[str, str] = {}
-        self.create_error: K8sError | None = None
-
-    async def list_jobs(self) -> list[JobInfo]:
-        return list(self.jobs.values())
-
-    async def create_job(self, manifest: dict[str, Any]) -> None:
-        if self.create_error is not None:
-            raise self.create_error
-        meta = manifest["metadata"]
-        labels = meta["labels"]
-        self.created.append(meta["name"])
-        self.jobs[meta["name"]] = JobInfo(
-            meta["name"], labels["wmg.dev/store"], labels["wmg.dev/action"], "running"
-        )
-
-    async def delete_job(self, name: str) -> None:
-        self.deleted.append(name)
-        self.jobs.pop(name, None)
-
-    async def put_secret(self, name: str, data: dict[str, str], labels: dict[str, str]) -> None:
-        self.secrets[name] = data
-
-    async def delete_secret(self, name: str) -> None:
-        self.secrets.pop(name, None)
-
-    async def job_logs(self, name: str, lines: int = 20) -> str:
-        return self.logs.get(name, "")
-
-    def finish(self, name: str, state: Any, reason: str | None = None) -> None:
-        self.jobs[name] = replace(self.jobs[name], state=state, reason=reason)
 
 
 async def job(pool: Any, kind: str, name: str, attempt: int) -> str:
@@ -163,13 +121,13 @@ async def test_store_name_taken_by_manual_server(gateway_factory: Any) -> None:
         assert r.status_code == 409
 
 
-async def test_reconciler_lifecycle(gateway_factory: Any, database_url: str) -> None:
+async def test_reconciler_lifecycle(gateway_factory: Any, database_url: str, fake_jobs: Any) -> None:
     """Queueing, ready + registration, failure + logs, retry, delete (registration first), teardown fail."""
     gw = gateway_factory(
         run_leader=False, provision_concurrency=2, max_stores_per_user=10, max_stores_total=10, **PROVISIONING
     )
     rt = gw.app.state.runtime
-    fake = FakeJobs()
+    fake = fake_jobs
     ready: list[uuid.UUID] = []
     removed: list[uuid.UUID] = []
 
@@ -316,10 +274,12 @@ async def test_reconciler_lifecycle(gateway_factory: Any, database_url: str) -> 
         await pool.close()
 
 
-async def test_reconciler_timeouts_errors_and_fencing(gateway_factory: Any, database_url: str) -> None:
+async def test_reconciler_timeouts_errors_and_fencing(
+    gateway_factory: Any, database_url: str, fake_jobs: Any
+) -> None:
     gw = gateway_factory(run_leader=False, max_stores_per_user=10, max_stores_total=10, **PROVISIONING)
     rt = gw.app.state.runtime
-    fake = FakeJobs()
+    fake = fake_jobs
     pool = await create_pool(database_url, 1, 4)
     recon = StoreReconciler(pool, fake, rt.settings, rt.cipher)
 

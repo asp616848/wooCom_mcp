@@ -376,6 +376,8 @@ async def update_server(
             row = await conn.fetchrow("SELECT * FROM mcp_servers WHERE id = $1 FOR UPDATE", server_id)
             if row is None:
                 raise AppError(404, "NOT_FOUND", "Server not found")
+            if row["source"] == "hosted":  # D94: its URL, credential and state belong to the deployment
+                raise AppError(409, "CONFLICT", "Manage hosted servers on the Hosted page")
             auth_type = body.auth_type or row["auth_type"]
             header = body.auth_header_name if "auth_header_name" in fields else row["auth_header_name"]
             credential_enc = row["credential_enc"]

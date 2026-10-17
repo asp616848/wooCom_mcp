@@ -111,6 +111,16 @@ namespace `store-paris` (own database, volumes, Secrets, NetworkPolicies, quota)
 namespace and its data. Ask the chat to *"Compare today's orders across paris and tokyo"* once both have an order.
 How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provisioning).
 
+### Stand-out features (admin)
+- **Tool permissions**: on a server's page, switch any tool to *Admins only*; members stop seeing it and their calls are
+  rejected, on every gateway replica within a second.
+- **Insights**: calls, error rate, p50/p95 latency per server and tool, and the top failure reasons (from the audit
+  log); raw Prometheus counters at the gateway's `/metrics`.
+- **Search mode**: `http://gateway.localhost/mcp/search` offers three tools (`search_tools`, `call_tool`,
+  `list_servers`) instead of every tool; the chat switches to it by itself above 40 tools.
+- **Hosted servers**: **Hosted** → *Deploy server* runs an MCP server from a container image (`wmg/`, `ghcr.io/` or
+  `docker.io/`) in the `mcp-hosted` namespace with its own credential, quota and NetworkPolicy, and registers it.
+
 ## Make targets
 | Target | What it does |
 |---|---|
@@ -122,6 +132,7 @@ How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provi
 | `make lint`, `make typecheck`, `make test`, `make test-integration` | checks (integration tests start Postgres in Docker) |
 | `make e2e` | acceptance + isolation tests against the running cluster |
 | `make e2e-stores` | bonus store provisioning tests (creates/deletes `paris` and `tokyo`, ~15 min) |
+| `make e2e-hosted` | hosted MCP server test (deploys and removes `pincode-hosted`, ~1 min) |
 | `make vps-bootstrap`, `make prod-up`, `make vps-tunnel` | VPS: k3s + cert-manager, deploy everything with prod values, reopen the API tunnel |
 | `make test-k8s`, `make verify-k8s` | network/PSA/RBAC/SSRF checks; every workload has requests, limits and probes |
 

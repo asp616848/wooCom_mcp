@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,6 +31,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from wmg_common.auth import StaticCredentialMiddleware
 from wmg_gateway.http.app import create_app
+from wmg_gateway.provisioner.k8s import JobInfo, K8sError
 from wmg_gateway.settings import Settings
 from wmg_gateway.upstream.manager import UpstreamManager
 
@@ -353,3 +354,53 @@ def serve() -> Iterator[Callable[[ASGIApp], ThreadServer]]:
     yield make
     for server in started:
         server.stop()
+
+
+class FakeJobs:
+    """In-memory JobApi: Jobs start 'running'; tests finish them with `finish()`."""
+
+    def __init__(self) -> None:
+        self.jobs: dict[str, JobInfo] = {}
+        self.created: list[str] = []
+        self.deleted: list[str] = []
+        self.secrets: dict[str, dict[str, str]] = {}
+        self.logs: dict[str, str] = {}
+        self.create_error: K8sError | None = None
+
+    async def list_jobs(self) -> list[JobInfo]:
+        return list(self.jobs.values())
+
+    async def create_job(self, manifest: dict[str, Any]) -> None:
+        if self.create_error is not None:
+            raise self.create_error
+        meta = manifest["metadata"]
+        labels = meta["labels"]
+        self.created.append(meta["name"])
+        self.jobs[meta["name"]] = JobInfo(
+            meta["name"],
+            labels.get("wmg.dev/store", ""),
+            labels["wmg.dev/action"],
+            "running",
+            hosted=labels.get("wmg.dev/hosted", ""),
+        )
+
+    async def delete_job(self, name: str) -> None:
+        self.deleted.append(name)
+        self.jobs.pop(name, None)
+
+    async def put_secret(self, name: str, data: dict[str, str], labels: dict[str, str]) -> None:
+        self.secrets[name] = data
+
+    async def delete_secret(self, name: str) -> None:
+        self.secrets.pop(name, None)
+
+    async def job_logs(self, name: str, lines: int = 20) -> str:
+        return self.logs.get(name, "")
+
+    def finish(self, name: str, state: Any, reason: str | None = None) -> None:
+        self.jobs[name] = replace(self.jobs[name], state=state, reason=reason)
+
+
+@pytest.fixture
+def fake_jobs() -> FakeJobs:
+    return FakeJobs()

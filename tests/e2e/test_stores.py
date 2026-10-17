@@ -293,22 +293,26 @@ def test_03_B04_kill_deployer_pod_mid_helm(world: World) -> None:
     """The Job retries (backoffLimit 1) and the script recovers the interrupted Helm release."""
     need(world.started, "the stores")
 
-    def helm_running() -> bool:
+    def helm_creating() -> bool:
+        """Helm has started and created the release's Deployments (it is now waiting for them)."""
         pods = deployer_pods("paris", world.started_at)
-        return (
-            bool(pods) and "5/6 helm" in kubectl("logs", "-n", "mcp-platform", pods[-1], check=False).stdout
-        )
+        if not pods or "5/6 helm" not in kubectl("logs", "-n", "mcp-platform", pods[-1], check=False).stdout:
+            return False
+        return bool(kubectl("get", "deploy", "-n", "store-paris", "-o", "name", check=False).stdout.strip())
 
-    eventually(helm_running, 180)
-    time.sleep(20)  # Helm is now creating the release's resources
+    # event-driven, not a fixed sleep: a warm cluster installs a store in under a minute (P15 finding)
+    eventually(helm_creating, 180, step=1)
     (victim,) = deployer_pods("paris", world.started_at)
+    phase = kubectl("get", "pod", victim, "-n", "mcp-platform", "-o", "jsonpath={.status.phase}").stdout
+    assert phase == "Running", f"Helm finished before the kill ({phase}): B-04 did not interrupt anything"
     kubectl("delete", "pod", victim, "-n", "mcp-platform", "--wait=false")
     eventually(lambda: any(p != victim for p in deployer_pods("paris", world.started_at)), 120)
 
 
 def test_04_B03_kill_gateway_pods_during_provisioning(world: World) -> None:
     rohan = need(world.rohan, "Rohan")
-    assert stores(rohan)["tokyo"]["status"] == "provisioning"
+    # paris's retried Job (B-04) is still recovering the release, so provisioning is in flight for sure
+    assert stores(rohan)["paris"]["status"] == "provisioning"
     kubectl("delete", "pod", "-n", "mcp-platform", "-l", "app.kubernetes.io/name=gateway", "--wait=false")
     kubectl(
         "rollout", "status", "deploy/platform-gateway", "-n", "mcp-platform", "--timeout=180s", timeout=200

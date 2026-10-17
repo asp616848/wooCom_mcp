@@ -37,23 +37,7 @@ else
 fi
 
 log "4/6 release state"
-# A killed Job pod can leave the release mid-operation; bring it back to a state `upgrade --install` accepts.
-# (Helm 4 `list` shows releases in every status by default.)
-status=$(helm list -n "$NS" -o json | jq -r --arg n "$NAME" '.[] | select(.name == $n) | .status')
-echo "release status: ${status:-none}"
-case "$status" in
-  pending-install|uninstalling)
-    log "previous install was interrupted: uninstalling it"
-    helm uninstall "$NAME" -n "$NS" --wait --timeout 5m ;;
-  pending-upgrade|pending-rollback)
-    log "previous upgrade was interrupted: rolling back"
-    helm rollback "$NAME" 0 -n "$NS" --wait --timeout 5m ;;
-  failed)
-    if ! helm history "$NAME" -n "$NS" -o json | jq -e 'any(.[]; .status == "deployed" or .status == "superseded")' >/dev/null; then
-      log "release never deployed: uninstalling it"
-      helm uninstall "$NAME" -n "$NS" --wait --timeout 5m
-    fi ;;
-esac
+recover_release "$NAME" "$NS"
 
 log "5/6 helm upgrade --install $NAME ($ENV)"
 helm upgrade --install "$NAME" "$CHART" -n "$NS" -f "$CHART/values-$ENV.yaml" -f "$CHART/values-bonus.yaml" \

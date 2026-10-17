@@ -1,4 +1,4 @@
-# deployer image (DESIGN §13.3, D78): helm + kubectl + the woo-store chart + the provisioning scripts.
+# deployer image (DESIGN §13.3, §14, D78): helm + kubectl + the woo-store and mcp-server charts + the scripts.
 # Build from the repo root: docker build -f deploy/deployer/Dockerfile .  (context filtered by Dockerfile.dockerignore)
 # Binaries are verified against the upstream sha256 for each architecture (release.yml builds amd64 + arm64).
 FROM alpine:3.24 AS tools
@@ -27,6 +27,7 @@ FROM alpine:3.24
 RUN apk add --no-cache bash ca-certificates jq openssl
 COPY --from=tools /usr/local/bin/helm /usr/local/bin/kubectl /usr/local/bin/
 COPY charts/woo-store /charts/woo-store
+COPY charts/mcp-server /charts/mcp-server
 COPY --chmod=0755 deploy/deployer/scripts/ /usr/local/bin/
 # Read-only root filesystem: everything writable lives under /tmp (an emptyDir in the Job).
 ENV HOME=/tmp HELM_CACHE_HOME=/tmp/helm/cache HELM_CONFIG_HOME=/tmp/helm/config HELM_DATA_HOME=/tmp/helm/data \

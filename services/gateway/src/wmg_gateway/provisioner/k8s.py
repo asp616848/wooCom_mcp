@@ -1,4 +1,4 @@
-"""Kubernetes access for the provisioner (D77, DESIGN §8.6, §13.2).
+"""Kubernetes access for the provisioner (D77, DESIGN §8.6, §13.2, §14).
 
 The gateway only touches its own namespace: it creates deployer Jobs and their input Secrets, reads Job
 status and the last log lines of a failed Job. `JobApi` is the seam the reconciler depends on; `KubeJobApi`
@@ -15,13 +15,16 @@ from wmg_common.logging import get_logger
 
 log = get_logger(__name__)
 
-Action = Literal["provision", "teardown"]
+# provision / teardown: bonus stores (§13); deploy / remove: hosted MCP servers (§14, SO-5)
+Action = Literal["provision", "teardown", "deploy", "remove"]
+INSTALL_ACTIONS = frozenset({"provision", "deploy"})  # count against PROVISION_CONCURRENCY together
 JobState = Literal["running", "succeeded", "failed"]
 
 DEPLOYER_SA = "wmg-deployer"
 DEPLOYER_UID = 65532
 COMPONENT_LABEL = {"app.kubernetes.io/name": "deployer", "app.kubernetes.io/part-of": "wmg"}
 STORE_LABEL = "wmg.dev/store"
+HOSTED_LABEL = "wmg.dev/hosted"
 ACTION_LABEL = "wmg.dev/action"
 JOB_NAME_LABEL = "batch.kubernetes.io/job-name"
 JOB_TTL_S = 3600
@@ -35,6 +38,7 @@ class JobInfo:
     action: str
     state: JobState
     reason: str | None = None  # Failed condition: "<reason>: <message>"
+    hosted: str = ""
 
 
 class K8sError(Exception):
@@ -69,24 +73,49 @@ def input_secret_name(store: str) -> str:
     return f"wmg-prov-{store}"
 
 
+def host_job_name(slug: str, server_id: str, attempt: int) -> str:
+    return f"wmg-host-{slug}-{server_id.replace('-', '')[:8]}-{attempt}"
+
+
+def unhost_job_name(slug: str, server_id: str, attempt: int) -> str:
+    return f"wmg-unhost-{slug}-{server_id.replace('-', '')[:8]}-{attempt}"
+
+
+def hosted_input_secret_name(slug: str) -> str:
+    return f"wmg-hosted-{slug}"
+
+
+_SCRIPTS: dict[str, str] = {
+    "provision": "provision-store.sh",
+    "teardown": "teardown-store.sh",
+    "deploy": "deploy-hosted.sh",
+    "remove": "remove-hosted.sh",
+}
+
+
 def deployer_job(
     *,
     name: str,
     namespace: str,
     image: str,
-    store: str,
+    target: str,
     action: Action,
     values_env: str,
     deadline_s: int,
+    hosted_namespace: str = "mcp-hosted",
 ) -> dict[str, Any]:
-    """Job running `provision-store.sh <store>` / `teardown-store.sh <store>` as `wmg-deployer` (§13.2)."""
-    labels = {**COMPONENT_LABEL, STORE_LABEL: store, ACTION_LABEL: action}
-    script = "provision-store.sh" if action == "provision" else "teardown-store.sh"
+    """Job running `<script> <target>` as `wmg-deployer` (§13.2): a store name or a hosted server slug."""
+    hosted = action in ("deploy", "remove")
+    labels = {**COMPONENT_LABEL, HOSTED_LABEL if hosted else STORE_LABEL: target, ACTION_LABEL: action}
     mounts: list[dict[str, Any]] = [{"name": "tmp", "mountPath": "/tmp"}]  # noqa: S108
     volumes: list[dict[str, Any]] = [{"name": "tmp", "emptyDir": {"sizeLimit": "256Mi"}}]
-    if action == "provision":
+    env = [{"name": "VALUES_ENV", "value": values_env}]
+    if hosted:
+        env.append({"name": "HOSTED_NAMESPACE", "value": hosted_namespace})
+    if action in INSTALL_ACTIONS:
+        secret = hosted_input_secret_name(target) if hosted else input_secret_name(target)
         mounts.append({"name": "input", "mountPath": "/input", "readOnly": True})
-        volumes.append({"name": "input", "secret": {"secretName": input_secret_name(store)}})
+        volumes.append({"name": "input", "secret": {"secretName": secret}})
     return {
         "apiVersion": "batch/v1",
         "kind": "Job",
@@ -113,8 +142,8 @@ def deployer_job(
                             "name": "deployer",
                             "image": image,
                             "imagePullPolicy": "IfNotPresent",
-                            "args": [script, store],
-                            "env": [{"name": "VALUES_ENV", "value": values_env}],
+                            "args": [_SCRIPTS[action], target],
+                            "env": env,
                             "resources": {
                                 "requests": {"cpu": "100m", "memory": "128Mi"},
                                 "limits": {"cpu": "500m", "memory": "256Mi"},
@@ -190,6 +219,7 @@ class KubeJobApi:
                     labels.get(ACTION_LABEL, ""),
                     state,
                     reason,
+                    labels.get(HOSTED_LABEL, ""),
                 )
             )
         return jobs

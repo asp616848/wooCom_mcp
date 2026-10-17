@@ -268,6 +268,53 @@ export const storesApi = {
   remove: (name: string) => api<{ store: Store }>(`/stores/${encodeURIComponent(name)}`, 'DELETE'),
 };
 
+// ---- hosted MCP servers (SO-5, DESIGN §14) ----
+export type DeployStatus = 'deploying' | 'deployed' | 'failed' | 'removing';
+
+export interface HostedServer {
+  serverId: string;
+  slug: string;
+  name: string;
+  image: string;
+  port: number;
+  path: string;
+  url: string;
+  env: Record<string, string>;
+  secretEnvKeys: string[];
+  size: 'small' | 'medium';
+  allowInternet: boolean;
+  authType: AuthType;
+  authHeaderName: string | null;
+  deployStatus: DeployStatus;
+  deployReason: string | null;
+  attempt: number;
+  serverStatus: ServerStatus;
+  toolCount: number;
+  createdAt: string;
+  deployedAt: string | null;
+}
+
+export interface HostedInput {
+  slug: string;
+  name: string;
+  image: string;
+  port: number;
+  path: string;
+  env: Record<string, string>;
+  secretEnv: Record<string, string>;
+  size: 'small' | 'medium';
+  allowInternet: boolean;
+  authType: AuthType;
+  authHeaderName?: string;
+}
+
+export const hostedApi = {
+  list: () => api<{ hosted: HostedServer[] }>('/hosted-servers'),
+  create: (body: HostedInput) => api<{ hosted: HostedServer }>('/hosted-servers', 'POST', body),
+  retry: (id: string) => api<{ hosted: HostedServer }>(`/hosted-servers/${id}/retry`, 'POST'),
+  remove: (id: string) => api<{ hosted: HostedServer }>(`/hosted-servers/${id}`, 'DELETE'),
+};
+
 // ---- insights (SO-8, DESIGN §16) ----
 export type InsightsWindow = '1h' | '24h' | '7d';
 

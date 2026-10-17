@@ -1,0 +1,56 @@
+{{- if .Values.provisioning.enabled }}
+{{- with .Values.hosted }}
+{{- /*
+SO-5 hosted MCP servers (DESIGN §14, D94). The namespace itself is created by `make platform` (labels
+wmg.dev/role=hosted, PSA restricted). Here: its guardrails and the deployer's access. The admission policy keeps the
+deployer from changing any of these (or the Namespace object).
+*/}}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: hosted-quota
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "mcp-platform.labels" (list $ "hosted") | nindent 4 }}
+spec:
+  hard:
+    requests.cpu: {{ .quota.requestsCpu | quote }}
+    requests.memory: {{ .quota.requestsMemory | quote }}
+    limits.cpu: {{ .quota.limitsCpu | quote }}
+    limits.memory: {{ .quota.limitsMemory | quote }}
+    pods: {{ .quota.pods | quote }}
+    services: {{ .quota.pods | quote }}
+    persistentvolumeclaims: "0"
+---
+# Defaults for anything without resources, and a per-container ceiling of the chart's "medium" size
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: hosted-limits
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "mcp-platform.labels" (list $ "hosted") | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default: { cpu: 200m, memory: 192Mi }
+      defaultRequest: { cpu: 25m, memory: 96Mi }
+      max: { cpu: 500m, memory: 320Mi }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wmg-deployer
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "mcp-platform.labels" (list $ "deployer") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wmg-store-deployer
+subjects:
+  - kind: ServiceAccount
+    name: wmg-deployer
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}

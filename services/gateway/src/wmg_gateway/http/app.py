@@ -26,11 +26,24 @@ from wmg_gateway.catalog.catalog import server_entry
 from wmg_gateway.db.migrate import migrate
 from wmg_gateway.db.pool import create_pool
 from wmg_gateway.events.bus import EventListener
-from wmg_gateway.http.api import audit, auth, chat, connect, insights, invites, keys, servers, stores, users
+from wmg_gateway.http.api import (
+    audit,
+    auth,
+    chat,
+    connect,
+    hosted,
+    insights,
+    invites,
+    keys,
+    servers,
+    stores,
+    users,
+)
 from wmg_gateway.http.deps import csrf_check
 from wmg_gateway.leader import Leader
 from wmg_gateway.mcp.search import SEARCH_PATH, build_search_server
 from wmg_gateway.mcp.servers import build_full_server
+from wmg_gateway.provisioner.hosted import HostedReconciler
 from wmg_gateway.provisioner.stores import StoreReconciler
 from wmg_gateway.request_context import RequestContextMiddleware
 from wmg_gateway.runtime import Runtime
@@ -135,10 +148,9 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
         async with anyio.create_task_group() as tg:
             tg.start_soon(checker.run_forever)
             if rt.k8s is not None:
-                reconciler = StoreReconciler(
-                    rt.pool, rt.k8s, settings, rt.cipher, on_ready=probe_server, on_removed=forget_server
-                )
-                tg.start_soon(reconciler.run_forever)
+                hooks = {"on_ready": probe_server, "on_removed": forget_server}
+                for reconciler in (StoreReconciler, HostedReconciler):
+                    tg.start_soon(reconciler(rt.pool, rt.k8s, settings, rt.cipher, **hooks).run_forever)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -189,7 +201,7 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     api = APIRouter(prefix="/api", dependencies=[Depends(csrf_check)])
-    for module in (auth, users, invites, keys, servers, audit, insights, connect, chat, stores):
+    for module in (auth, users, invites, keys, servers, audit, insights, connect, chat, stores, hosted):
         api.include_router(module.router)
 
     # Without this, unknown /api paths would fall through to the MCP mount and get its plain-text 404.
