@@ -38,6 +38,7 @@ VPS_KUBECONFIG := $(HOME)/.kube/wmg-vps.yaml
 SSH_KEY     ?= $(HOME)/.ssh/wmg_oci
 ISSUER_SET   = --set-string 'ingress.annotations.cert-manager\.io/cluster-issuer=$(CERT_ISSUER)'
 STORE_ENV_SET :=
+STORE_SET ?=
 UPSTREAM_ENV_SET :=
 PLATFORM_ENV_SET :=
 KUBECTL_ENV :=
@@ -65,7 +66,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e e2e-scale perf verify-k8s images kubeconform upstreams upstreams-uninstall \
+        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e e2e-scale e2e-upgrades perf backup-store restore-store store-upgrade verify-k8s images kubeconform upstreams upstreams-uninstall \
         e2e-stores e2e-hosted platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
@@ -86,14 +87,25 @@ cluster: ## Create the local k3d cluster if it does not exist
 cluster-delete: ## Delete the k3d cluster (destroys all data)
 	k3d cluster delete $(CLUSTER)
 
-store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag from .image-tag, run `make images` first)
+store: ## Install/upgrade the store (STORE=main ENV=local; woo-mcp image tag from .image-tag; extra values: STORE_SET=...)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
 	@kubectl create namespace $(STORE_NS) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 	@# D22: the apache WordPress image needs root to bind :80, so stores run under PSA baseline (not restricted)
 	@kubectl label --overwrite namespace $(STORE_NS) wmg.dev/role=store pod-security.kubernetes.io/enforce=baseline >/dev/null
 	helm upgrade --install $(STORE) $(STORE_CHART) -n $(STORE_NS) \
 	  -f $(STORE_CHART)/values-$(ENV).yaml --set-string wooMcp.image.repository=$(IMAGE_PREFIX)woo-mcp \
-	  --set-string wooMcp.image.tag=$(IMAGE_TAG) $(STORE_ENV_SET) --wait --timeout 10m
+	  --set-string wooMcp.image.tag=$(IMAGE_TAG) $(STORE_ENV_SET) $(STORE_SET) --wait --timeout 10m
+
+backup-store: ## Back up the store's database + wp-content to backups/<store>/<ts>/ (STORE=main; DESIGN §18)
+	scripts/backup-store.sh $(STORE)
+
+restore-store: ## Restore a store backup: replaces its database + wp-content (STORE=main TS=<timestamp>; asks first)
+	@test -n "$(TS)" || { echo "TS=<timestamp> required: ls backups/$(STORE)"; exit 1; }
+	scripts/restore-store.sh $(STORE) $(TS)
+
+store-upgrade: ## Back up, then upgrade the store (STORE_SET='--set-string store.title=...'); rollback: helm rollback + restore-store
+	$(MAKE) backup-store
+	$(MAKE) store
 
 upstreams: ## Install/upgrade gst (bearer) + pincode (X-Api-Key) in mcp-upstreams (image tag from .image-tag)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
@@ -219,6 +231,9 @@ e2e-hosted: ## SO-5 hosted MCP server SO5-01 against the running cluster (TESTIN
 
 e2e-scale: ## SO-7 two replicas: NFR-P1/P2 in-cluster, leader kills under load, PDB, rate limit (`make platform SCALE=1` first; ~4 min)
 	$(UV_RUN) pytest tests/e2e/test_scale.py -m bonus -v -rP --durations=0
+
+e2e-upgrades: ## SO9-01 helm upgrade + rollback of gateway, pincode and store (backup/restore) on the local cluster (~6 min)
+	$(UV_RUN) pytest tests/e2e/test_upgrades.py -m bonus -v -rP --durations=0
 
 perf: ## TESTING §7 autocannon run through the ingress (PERF_AUTH='Authorization=Bearer <key>' RUN=list|call)
 	tests/perf/run.sh $(or $(RUN),list) 30 0 | tail -1

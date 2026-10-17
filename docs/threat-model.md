@@ -45,7 +45,8 @@ Each upstream has **one** credential that the whole team shares through the gate
 - **Access ends instantly.** Revoking a key or disabling a user takes effect on the next request; rotating the upstream
   credential is one edit in the dashboard and no member has to change anything.
 - **Residual**: within the tools they are allowed, a member acts with the shared credential's power. Per-tool policies
-  and the audit log bound and expose it; per-credential rate limits come with the scaling work.
+  and the audit log bound and expose it, and each credential gets 120 tool calls a minute (an admin can set another
+  limit per key), counted across all gateway replicas.
 
 ## 2. Why client tokens are not passed through to upstreams
 - A member's `mgw_…` key is issued **for the gateway**. Forwarding it would hand a bearer credential to every upstream,
@@ -86,7 +87,7 @@ An admin may register a server that later turns malicious, or whose descriptions
 | Use someone else's identity | keys are personal and hashed; the chat JWT is minted server-side for the session's user only |
 | Change servers, credentials or policies | admin-only routes (`403` for members) |
 | Read another member's chat | chat history lives only in the browser tab; nothing is stored server-side |
-| Starve others of an upstream | each upstream has a per-replica concurrency cap and every call has a timeout; per-credential rate limits are a planned addition |
+| Starve others of an upstream | each upstream has a per-replica concurrency cap, every call has a timeout, and each credential is limited to 120 tool calls a minute across all replicas (refused calls are audited as `rate_limited`) |
 | See shared business data | yes, by design: tools act on the team's store; members are teammates, not tenants |
 An **admin** can disable a member, revoke their keys and see everything they did; an admin can't disable or demote
 themselves or the last active admin, so the team can't be locked out by mistake. Invites are single-use links valid
@@ -105,6 +106,7 @@ for 72 hours, stored only as a hash.
 | A user exhausts the cluster with stores | 2 per user, 4 total (checked under a DB lock); ResourceQuota + LimitRange per store namespace; Job deadlines |
 | Privileged containers | PSA `restricted` on platform and upstream namespaces; `baseline` on the store (Apache) |
 | Secrets in Git | none: generated in-cluster or created from a git-ignored `.env`; `.gitignore` blocks env and key files |
+| Store backups leak | `backups/` is git-ignored and written owner-only (`umask 077`); a backup holds password hashes and WooCommerce API keys, so treat it like a Secret; the scripts read database passwords inside the pods, never on the operator's command line |
 
 ## Residual risks and next steps
 - WordPress runs as root (official Apache image); a hardened image would allow PSA `restricted` in the store too.
