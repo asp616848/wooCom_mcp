@@ -30,3 +30,33 @@ ensure_access() {
   echo "RoleBinding in $ns did not take effect within 30 s" >&2
   exit 1
 }
+
+hosted_slug() {
+  local slug=${1:-}
+  if [[ ! $slug =~ ^[a-z][a-z0-9-]{1,29}$ ]] || [[ $slug == *--* ]] || [[ $slug == *- ]]; then
+    echo "invalid hosted server slug '${slug}' (^[a-z][a-z0-9-]{1,29}$, no '--', no trailing '-')" >&2
+    exit 2
+  fi
+  echo "$slug"
+}
+
+# A killed Job pod can leave a release mid-operation; bring it back to a state `upgrade --install` accepts
+# (D91). Helm 4 `list` shows releases in every status by default. Usage: recover_release <release> <namespace>
+recover_release() {
+  local rel=$1 ns=$2 status
+  status=$(helm list -n "$ns" -o json | jq -r --arg n "$rel" '.[] | select(.name == $n) | .status')
+  echo "release status: ${status:-none}"
+  case "$status" in
+    pending-install|uninstalling)
+      log "previous install was interrupted: uninstalling it"
+      helm uninstall "$rel" -n "$ns" --wait --timeout 5m ;;
+    pending-upgrade|pending-rollback)
+      log "previous upgrade was interrupted: rolling back"
+      helm rollback "$rel" 0 -n "$ns" --wait --timeout 5m ;;
+    failed)
+      if ! helm history "$rel" -n "$ns" -o json | jq -e 'any(.[]; .status == "deployed" or .status == "superseded")' >/dev/null; then
+        log "release never deployed: uninstalling it"
+        helm uninstall "$rel" -n "$ns" --wait --timeout 5m
+      fi ;;
+  esac
+}

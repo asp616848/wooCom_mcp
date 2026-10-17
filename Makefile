@@ -22,6 +22,7 @@ CHART_CHECK_SET := --set-string wooMcp.image.tag=check --set-string image.reposi
 UPSTREAMS_NS := mcp-upstreams
 SERVER_CHART := charts/mcp-server
 PLATFORM_NS  := mcp-platform
+HOSTED_NS    := mcp-hosted
 PLATFORM_CHART := charts/mcp-platform
 # seed slug  <-  namespace/secret/key holding that upstream's credential
 # Image repositories: local k3d imports are wmg/<svc>; prod pulls ghcr.io/<GH_OWNER>/wmg-<svc> (D20)
@@ -65,7 +66,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
         status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e verify-k8s images kubeconform upstreams upstreams-uninstall \
-        e2e-stores platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
+        e2e-stores e2e-hosted platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -113,6 +114,8 @@ upstreams-uninstall: ## Uninstall gst + pincode (credential Secrets are kept)
 platform-ns:
 	@kubectl create namespace $(PLATFORM_NS) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 	@kubectl label --overwrite namespace $(PLATFORM_NS) wmg.dev/role=platform pod-security.kubernetes.io/enforce=restricted >/dev/null
+	@kubectl create namespace $(HOSTED_NS) --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@kubectl label --overwrite namespace $(HOSTED_NS) wmg.dev/role=hosted pod-security.kubernetes.io/enforce=restricted >/dev/null
 
 seed-credentials: platform-ns ## Copy upstream credentials into mcp-platform Secrets <slug>-upstream-credential (values never printed)
 	@for pair in $(SEED_SOURCES); do \
@@ -209,6 +212,9 @@ e2e: ## DoD acceptance suite + isolation checks against the running cluster (TES
 
 e2e-stores: ## Bonus store provisioning B-01..B-07 against the running cluster (TESTING §6; ~15 min, creates paris/tokyo)
 	$(UV_RUN) pytest tests/e2e/test_stores.py -m bonus -v --durations=0
+
+e2e-hosted: ## SO-5 hosted MCP server SO5-01 against the running cluster (TESTING §6; ~3 min, deploys pincode-hosted)
+	$(UV_RUN) pytest tests/e2e/test_hosted.py -m bonus -v --durations=0
 
 # Deployments/StatefulSets: requests, limits, liveness, readiness. Jobs run to completion: requests + limits only.
 VERIFY_JQ := '[.items[] | select(.metadata.namespace | test("^(store-|mcp-)")) | .kind as $$k \

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  Boxes,
   ChartColumn,
   KeyRound,
   LogOut,
@@ -35,6 +36,7 @@ const NAV: NavItem[] = [
   { to: '/connect', label: 'Connect', icon: Plug, roles: ['admin', 'member'] },
   { to: '/chat', label: 'Chat', icon: MessageSquare, roles: ['admin', 'member'] },
   { to: '/stores', label: 'Stores', icon: Store, roles: ['admin', 'member'] },
+  { to: '/hosted', label: 'Hosted', icon: Boxes, roles: ['admin'] },
 ];
 
 export function Layout() {

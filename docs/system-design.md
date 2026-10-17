@@ -156,3 +156,18 @@ reach `tokyo`'s database (tested). The deployer is confined twice: RBAC gives it
 store namespaces it binds itself into, and a ValidatingAdmissionPolicy rejects any write it makes outside
 `store-<name>` (never `store-main`).
 
+## 12. Stand-out features
+- **Tool permissions (SO-2)**: `tool_policies` rows (admin-only on/off per tool) live in the in-memory catalog of
+  every replica; a change NOTIFYs all of them, so `tools/list` and `tools/call` enforce it within a second. Woo write
+  tools start admin-only.
+- **Observability (SO-8)**: Prometheus counters and histograms per server (`wmg_tool_calls_total`,
+  `wmg_tool_call_duration_seconds`, `wmg_upstream_up`, `wmg_upstream_tools`, `wmg_tools_list_duration_seconds`) and an
+  Insights page computed from the audit log, so its numbers always match the audit trail.
+- **Many tools (SO-4)**: `/mcp/search` is a second MCP endpoint with three fixed tools. `search_tools` ranks the tools
+  the caller may use by the words of the query (name, title, description, input schema); `call_tool` runs one through
+  the normal path, audited as the real tool. The chat agent uses it when a user can see more than 40 tools.
+- **Hosted servers (SO-5)**: the store machinery reused for any MCP server image: an admin request becomes a disabled
+  server row plus a deploy request; the leader's reconciler runs a deployer Job that installs the generic
+  `mcp-server` chart into `mcp-hosted` with a credential the gateway generated, then enables the server. The
+  namespace has its own quota and limits, and the admission policy keeps the deployer from touching them.
+

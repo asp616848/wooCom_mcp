@@ -1,4 +1,5 @@
-# Deployer build context = repo root, but only the store chart and the scripts go in (secret-free by construction).
+# Deployer build context = repo root, but only the two charts and the scripts go in (secret-free by construction).
 *
 !charts/woo-store
+!charts/mcp-server
 !deploy/deployer/scripts

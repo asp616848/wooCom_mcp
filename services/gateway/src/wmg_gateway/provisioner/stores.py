@@ -26,6 +26,7 @@ from wmg_gateway.bootstrap import WOO_ADMIN_ONLY_TOOLS
 from wmg_gateway.events.bus import notify
 from wmg_gateway.provisioner.k8s import (
     COMPONENT_LABEL,
+    INSTALL_ACTIONS,
     STORE_LABEL,
     JobApi,
     JobInfo,
@@ -114,7 +115,8 @@ class StoreReconciler:
         if not rows:
             return  # idle: no Kubernetes calls
         jobs = {j.name: j for j in await self._k8s.list_jobs()}
-        running = sum(1 for j in jobs.values() if j.action == "provision" and j.state == "running")
+        # stores and hosted servers share the concurrency limit (D94)
+        running = sum(1 for j in jobs.values() if j.action in INSTALL_ACTIONS and j.state == "running")
         for row in rows:
             try:
                 if row["status"] == "provisioning":
@@ -163,7 +165,7 @@ class StoreReconciler:
                 name=prov_job_name(name, str(row["id"]), row["attempt"]),
                 namespace=self._settings.k8s_namespace,
                 image=self._settings.deployer_image,
-                store=name,
+                target=name,
                 action="provision",
                 values_env=self._settings.store_values_env,
                 deadline_s=self._settings.provision_timeout_s,
@@ -242,7 +244,7 @@ class StoreReconciler:
                     name=del_job_name(name, str(row["id"]), row["attempt"]),
                     namespace=self._settings.k8s_namespace,
                     image=self._settings.deployer_image,
-                    store=name,
+                    target=name,
                     action="teardown",
                     values_env=self._settings.store_values_env,
                     deadline_s=self._settings.teardown_timeout_s,

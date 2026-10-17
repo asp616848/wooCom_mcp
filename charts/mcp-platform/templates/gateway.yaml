@@ -136,6 +136,11 @@ spec:
               value: {{ .maxStoresTotal | int | quote }}
             - name: PROVISION_TIMEOUT_S
               value: {{ .provisionTimeoutS | int | quote }}
+            # SO-5 hosted MCP servers (DESIGN §14)
+            - name: HOSTED_NAMESPACE
+              value: {{ $.Values.hosted.namespace | quote }}
+            - name: HOSTED_IMAGE_PREFIXES
+              value: {{ join "," $.Values.hosted.allowedImagePrefixes | quote }}
             {{- end }}
             {{- end }}
           lifecycle:

@@ -67,6 +67,12 @@ class Settings(ServiceSettings):
     provision_concurrency: int = Field(default=3, ge=1, le=10)
     reconcile_interval_s: float = Field(default=5.0, gt=0, le=60)
 
+    # P15 SO-5: hosted MCP servers (DESIGN §14, D94); enabled together with provisioning (same deployer)
+    hosted_namespace: str = "mcp-hosted"
+    hosted_image_prefixes: str = "wmg/,ghcr.io/,docker.io/"
+    hosted_deploy_timeout_s: int = Field(default=600, ge=60, le=3600)
+    hosted_remove_timeout_s: int = Field(default=300, ge=60, le=3600)
+
     @field_validator("credential_encryption_key")
     @classmethod
     def _key_is_32_bytes(cls, value: SecretStr) -> SecretStr:
@@ -95,6 +101,9 @@ class Settings(ServiceSettings):
 
     def provisioning_enabled(self) -> bool:
         return bool(self.deployer_image and self.woo_mcp_image)
+
+    def image_prefixes(self) -> list[str]:
+        return [p.strip() for p in self.hosted_image_prefixes.split(",") if p.strip()]
 
     def store_host(self, name: str) -> str:
         return self.store_host_template.replace("{name}", name)

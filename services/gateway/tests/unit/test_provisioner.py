@@ -20,7 +20,7 @@ def _job(action: Any) -> dict[str, Any]:
         name="wmg-prov-paris-1",
         namespace="mcp-platform",
         image="wmg/deployer:t1",
-        store="paris",
+        target="paris",
         action=action,
         values_env="prod",
         deadline_s=900,
@@ -116,3 +116,33 @@ def test_provisioning_settings(base_env: dict[str, str]) -> None:
         _settings(base_env, store_host_template="shop.x.io")  # must contain {name}
     with pytest.raises(ValidationError):
         _settings(base_env, store_values_env="staging")
+
+
+def test_hosted_job_manifests() -> None:
+    deploy = deployer_job(
+        name="wmg-host-pin-1",
+        namespace="mcp-platform",
+        image="wmg/deployer:t1",
+        target="pincode-hosted",
+        action="deploy",
+        values_env="local",
+        deadline_s=600,
+    )
+    labels = deploy["metadata"]["labels"]
+    assert labels["wmg.dev/hosted"] == "pincode-hosted" and "wmg.dev/store" not in labels
+    pod = deploy["spec"]["template"]["spec"]
+    assert pod["containers"][0]["args"] == ["deploy-hosted.sh", "pincode-hosted"]
+    assert {"name": "HOSTED_NAMESPACE", "value": "mcp-hosted"} in pod["containers"][0]["env"]
+    assert {"name": "input", "secret": {"secretName": "wmg-hosted-pincode-hosted"}} in pod["volumes"]
+    remove = deployer_job(
+        name="wmg-unhost-pin-1",
+        namespace="mcp-platform",
+        image="wmg/deployer:t1",
+        target="pincode-hosted",
+        action="remove",
+        values_env="local",
+        deadline_s=300,
+    )
+    rpod = remove["spec"]["template"]["spec"]
+    assert rpod["containers"][0]["args"] == ["remove-hosted.sh", "pincode-hosted"]
+    assert [v["name"] for v in rpod["volumes"]] == ["tmp"]
