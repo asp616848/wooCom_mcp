@@ -59,6 +59,7 @@ class World:
     key: str = ""
     server_id: str = ""
     deployed: bool = False
+    pods_before: int = 0  # other hosted servers may already run here (e.g. one deployed from the dashboard)
 
 
 @pytest.fixture(scope="module")
@@ -121,8 +122,14 @@ def test_00_admin_and_a_clean_slate(world: World) -> None:
     world.key = key.json()["key"]
 
 
+def quota_pods() -> int:
+    quota = json.loads(kubectl("get", "resourcequota", "hosted-quota", "-n", NS, "-o", "json").stdout)
+    return int(quota["status"]["used"]["pods"])
+
+
 def test_01_SO5_deploy_pincode_hosted(world: World) -> None:
     admin = need(world.admin, "an admin session")
+    world.pods_before = quota_pods()
     body = {
         "slug": SLUG,
         "name": "Pincode (hosted)",
@@ -159,8 +166,7 @@ def test_02_tools_listed_and_callable(world: World) -> None:
 
 def test_03_guardrails_in_mcp_hosted(world: World) -> None:
     need(world.deployed, "pincode-hosted deployed (test_01)")
-    quota = json.loads(kubectl("get", "resourcequota", "hosted-quota", "-n", NS, "-o", "json").stdout)
-    assert quota["status"]["used"]["pods"] == "1"
+    assert quota_pods() == world.pods_before + 1
     netpol = kubectl("get", "networkpolicy", REL, "-n", NS, "-o", "json")
     assert json.loads(netpol.stdout)["spec"]["policyTypes"] == ["Ingress", "Egress"]
     labels = json.loads(kubectl("get", "namespace", NS, "-o", "json").stdout)["metadata"]["labels"]
