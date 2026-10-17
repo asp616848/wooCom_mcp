@@ -29,6 +29,7 @@ from wmg_gateway.events.bus import EventListener
 from wmg_gateway.http.api import audit, auth, chat, connect, insights, invites, keys, servers, stores, users
 from wmg_gateway.http.deps import csrf_check
 from wmg_gateway.leader import Leader
+from wmg_gateway.mcp.search import SEARCH_PATH, build_search_server
 from wmg_gateway.mcp.servers import build_full_server
 from wmg_gateway.provisioner.stores import StoreReconciler
 from wmg_gateway.request_context import RequestContextMiddleware
@@ -90,10 +91,24 @@ class Readiness:
         return self._ok
 
 
+class McpRouter:
+    """Sends `/mcp/search` to the search-mode app (SO-4) and everything else to the full `/mcp` app."""
+
+    def __init__(self, full: ASGIApp, search: ASGIApp) -> None:
+        self.full = full
+        self.search = search
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "")
+        app = self.search if path == SEARCH_PATH or path.startswith(SEARCH_PATH + "/") else self.full
+        await app(scope, receive, send)
+
+
 def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
     readiness = Readiness()
     rt = Runtime.create(settings)
     mcp_server, mcp_app = build_full_server(rt)
+    search_server, search_app = build_search_server(rt)
 
     async def on_catalog_event() -> None:
         if await rt.catalog.reload(rt.pool):
@@ -134,7 +149,11 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
         try:
             await migrate(pool, after=lambda conn: bootstrap(conn, settings, rt.cipher))
             await rt.catalog.reload(pool)
-            async with mcp_server.session_manager.run(), anyio.create_task_group() as tg:
+            async with (
+                mcp_server.session_manager.run(),
+                search_server.session_manager.run(),
+                anyio.create_task_group() as tg,
+            ):
                 await tg.start(EventListener(dsn, on_catalog_event).run)
                 leader = Leader(dsn, leader_duties)
                 app.state.leader = leader
@@ -203,8 +222,8 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
         log.error("unhandled error", error=type(exc).__name__, exc_info=exc)
         return error_response(500, "INTERNAL", "Internal error")
 
-    # Last: serves /mcp (the SDK app routes only its own path; anything else is 404 from it).
-    app.mount("/", mcp_app)
+    # Last: serves /mcp and /mcp/search (each SDK app routes only its own path; anything else is 404).
+    app.mount("/", McpRouter(mcp_app, search_app))
 
     app.add_middleware(ApiBodyLimitMiddleware)
     app.add_middleware(RequestContextMiddleware)

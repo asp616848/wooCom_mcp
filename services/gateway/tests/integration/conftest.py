@@ -16,7 +16,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 import asyncpg
@@ -209,6 +209,36 @@ def secured_app() -> Recorder:
 
     app = mcp.streamable_http_app(stateless_http=True, json_response=True)
     return Recorder(StaticCredentialMiddleware(app, mode="bearer", token=FIXTURE_TOKEN))
+
+
+MANY_TOOLS = 60
+
+
+def many_app() -> ASGIApp:
+    """SO-4 fixture: 60 tools (over the chat search threshold of 40), one of them a realistic list_orders."""
+    mcp = MCPServer("fixture-many")
+
+    @mcp.tool(title="List orders", description="Orders, newest first, filtered by status and date.")
+    def list_orders(period: Literal["today", "yesterday", "last_7_days"] = "today") -> str:
+        return f"2 orders {period}"
+
+    def filler(n: int) -> Callable[[], str]:
+        def tool() -> str:
+            return f"filler {n}"
+
+        return tool
+
+    for n in range(MANY_TOOLS - 1):
+        mcp.add_tool(filler(n), name=f"tool_{n:02d}", description=f"Filler tool number {n}")
+    app: ASGIApp = mcp.streamable_http_app(stateless_http=True, json_response=True)
+    return app
+
+
+@pytest.fixture(scope="session")
+def many_tools() -> Iterator[ThreadServer]:
+    server = ThreadServer(many_app()).start()
+    yield server
+    server.stop()
 
 
 @dataclass

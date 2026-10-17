@@ -121,3 +121,70 @@ async def test_chat_guards(gateway_factory: Any) -> None:
         ]
         for case in bad:
             assert (await http.post("/api/chat", json=case)).status_code == 422, case
+
+
+class SearchingLlm:
+    """Search mode: search_tools → call_tool on the first hit → answer with its result."""
+
+    def __init__(self) -> None:
+        self.requests: list[dict[str, Any]] = []
+        self.app = Starlette(routes=[Route("/v1/chat/completions", self.completions, methods=["POST"])])
+
+    async def completions(self, request: Request) -> JSONResponse:
+        body = await request.json()
+        self.requests.append(body)
+        last = body["messages"][-1]
+        if last["role"] == "user":
+            call = ("search_tools", {"query": "orders today"})
+        elif last["role"] == "tool" and len(self.requests) == 2:
+            name = json.loads(last["content"])["tools"][0]["name"]
+            call = ("call_tool", {"name": name, "arguments": {"period": "today"}})
+        else:
+            return _completion(body, {"role": "assistant", "content": f"Found: {last['content']}"})
+        fn = {"name": call[0], "arguments": json.dumps(call[1])}
+        tool_call = {"id": f"c{len(self.requests)}", "type": "function", "function": fn}
+        message = {"role": "assistant", "content": None, "tool_calls": [tool_call]}
+        return _completion(body, message)
+
+
+def _completion(body: dict[str, Any], message: dict[str, Any]) -> JSONResponse:
+    return JSONResponse(
+        {
+            "id": "c",
+            "object": "chat.completion",
+            "created": 0,
+            "model": body["model"],
+            "choices": [{"index": 0, "finish_reason": "stop", "message": message}],
+        }
+    )
+
+
+async def test_SO4_02_chat_switches_to_search_mode(
+    gateway_factory: Any, many_tools: Any, database_url: str, serve: Any
+) -> None:
+    llm = SearchingLlm()
+    llm_server = serve(llm.app)
+    gw = gateway_factory(llm_base_url=llm_server.url + "/v1", llm_api_key="test-key", llm_model="fake-1")
+    async with httpx2.AsyncClient(base_url=gw.url, headers=CSRF, timeout=30) as http:
+        await login(http)
+        many = {"slug": "fx-many", "name": "M", "url": many_tools.url + "/mcp"}
+        r = await http.post("/api/servers", json=many)
+        assert r.status_code == 201, r.text
+        assert r.json()["server"]["toolCount"] == 60  # over TOOL_SEARCH_THRESHOLD (40)
+        r = await http.post("/api/chat", json={"messages": [{"role": "user", "content": "orders today?"}]})
+    events = parse_sse(r.text)
+    kinds = [e for e, _ in events]
+    assert kinds == ["tool_call", "tool_result", "tool_call", "tool_result", "answer", "done"]
+    assert events[2][1]["arguments"] == {"name": "fx-many__list_orders", "arguments": {"period": "today"}}
+    assert "2 orders today" in events[4][1]["text"]
+    first = llm.requests[0]
+    declared = sorted(t["function"]["name"] for t in first["tools"])
+    assert declared == ["call_tool", "list_servers", "search_tools"]
+    assert "Search mode" in first["messages"][0]["content"]
+    conn = await asyncpg.connect(database_url)
+    try:
+        row = await conn.fetchrow("SELECT * FROM audit_log WHERE exposed_name = 'fx-many__list_orders'")
+    finally:
+        await conn.close()
+    assert row["outcome"] == "success" and row["client_mode"] == "search"
+    assert row["credential_type"] == "chat_agent"
