@@ -44,6 +44,16 @@ spec:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          # D95: drop a gateway connection whose pod vanished without closing it (~5 s idle + 3 × 1 s probes),
+          # so the leader lock it held is released and another replica takes over
+          args:
+            - postgres
+            - -c
+            - tcp_keepalives_idle=5
+            - -c
+            - tcp_keepalives_interval=1
+            - -c
+            - tcp_keepalives_count=3
           ports:
             - name: postgres
               containerPort: 5432

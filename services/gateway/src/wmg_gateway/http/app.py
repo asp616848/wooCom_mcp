@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from mcp.server.subscriptions import ToolsListChanged
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -106,7 +107,11 @@ class Readiness:
 
 
 class McpRouter:
-    """Sends `/mcp/search` to the search-mode app (SO-4) and everything else to the full `/mcp` app."""
+    """Sends `/mcp/search` to the search-mode app (SO-4) and everything else to the full `/mcp` app.
+
+    A client that hangs up while its request is read is normal (a load generator stopping, a closed laptop).
+    The SDK's own Starlette app has already answered 500 to nobody and re-raised, so it ends here as one info
+    line instead of two error tracebacks (P16)."""
 
     def __init__(self, full: ASGIApp, search: ASGIApp) -> None:
         self.full = full
@@ -115,7 +120,10 @@ class McpRouter:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
         app = self.search if path == SEARCH_PATH or path.startswith(SEARCH_PATH + "/") else self.full
-        await app(scope, receive, send)
+        try:
+            await app(scope, receive, send)
+        except ClientDisconnect:
+            log.info("client disconnected", path=path)
 
 
 def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:

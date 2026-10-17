@@ -717,3 +717,84 @@ async def test_rate_limit_off_by_default_in_settings(gateway_factory: Any, upstr
     async with mcp(gw, key) as c:
         for _ in range(3):
             assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+
+
+def _leaders(*gws: Any) -> list[Any]:
+    return [g for g in gws if g.app.state.leader.is_leader]
+
+
+async def _one_leader(*gws: Any) -> bool:
+    return len(_leaders(*gws)) == 1
+
+
+async def test_SO7_01_leader_failover(gateway_factory: Any, database_url: str) -> None:
+    """SO7-01 (D95): Postgres drops the leader's lock connection (what keepalives do for a vanished pod) → the
+    other replica leads within 10 s and the old leader stands down; the new leader then shuts down cleanly →
+    the first takes over again. Never two leaders at once."""
+    a, b = gateway_factory(), gateway_factory()
+    await eventually(lambda: _one_leader(a, b), within=10)
+    first = _leaders(a, b)[0]
+    second = b if first is a else a
+
+    conn = await db(database_url)
+    try:
+        pids = await conn.fetch("SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted")
+        assert len(pids) == 1, pids
+        started = time.monotonic()
+        assert await conn.fetchval("SELECT pg_terminate_backend($1)", pids[0]["pid"])
+    finally:
+        await conn.close()
+    while not second.app.state.leader.is_leader:
+        assert len(_leaders(a, b)) <= 1, "two leaders"
+        assert time.monotonic() - started < 10, "no failover within 10 s"
+        await anyio.sleep(0.05)
+    took = time.monotonic() - started
+    await eventually(lambda: _one_leader(a, b), within=5)
+    assert _leaders(a, b) == [second] and took < 10, took
+
+    started = time.monotonic()
+    await anyio.to_thread.run_sync(second.server.stop)  # graceful: the lock connection closes with the pod
+    await eventually(lambda: _one_leader(first), within=10)
+    assert time.monotonic() - started < 10
+
+
+async def test_client_hanging_up_mid_request_is_not_an_error(
+    gateway_factory: Any, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A client that disconnects while its body is still being read (a load generator stopping, a closed
+    laptop) is logged as info, not as an unhandled error with a traceback (found in the P16 load runs). /api
+    routes already answer such a request with a plain 400 log line (FastAPI); checked too."""
+    gw = gateway_factory()
+    async with session(gw) as admin:
+        key = await new_key(admin)
+    mcp_head = (
+        f"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {key}\r\n"
+        "Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n"
+        "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/list\r\nContent-Length: 1000\r\n\r\n"
+    )
+    api_head = (
+        "POST /api/auth/login HTTP/1.1\r\nHost: 127.0.0.1\r\nX-WMG-CSRF: 1\r\n"
+        "Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n"
+    )
+    for head, path, line in (
+        (mcp_head, "/mcp", "client disconnected"),
+        (api_head, "/api/auth/login", "status=400"),
+    ):
+        capfd.readouterr()
+        stream = await anyio.connect_tcp("127.0.0.1", gw.server.port)
+        await stream.send(head.encode() + b'{"email":')
+        await anyio.sleep(0.3)  # the gateway is now waiting for the rest of the body
+        await stream.aclose()
+        output = ""
+        deadline = time.monotonic() + 5
+        while line not in output:  # logs come from the server thread: read stdout + stderr
+            assert time.monotonic() < deadline, (path, output[-2000:])
+            await anyio.sleep(0.1)
+            out, err = capfd.readouterr()
+            output += out + err
+        await anyio.sleep(0.3)
+        out, err = capfd.readouterr()
+        output += out + err
+        assert path in output, output[-2000:]
+        bad = ("unhandled error", "Exception in ASGI application", "Traceback")
+        assert not any(b in output for b in bad), (path, output[-2000:])
