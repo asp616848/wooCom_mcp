@@ -73,7 +73,7 @@ Example: Ritika's MCP client calls `woo-main__list_orders {"period": "today"}`.
 | Upstream overloaded | at most 16 in-flight calls per upstream per replica; extra calls wait and still respect the timeout |
 | Connection reset before any response | retried once, only for `tools/list` and tools annotated read-only or idempotent; writes are never retried |
 | Oversized result | replaced by an error (> 1 MB) instead of exhausting gateway memory |
-| Gateway pod dies | stateless; Kubernetes replaces it; in production a second replica keeps serving and takes over leadership |
+| Gateway pod dies | stateless; Kubernetes replaces it; in production a second replica keeps serving (0 failed requests when the leader is killed under 50 rps, gracefully or with SIGKILL) and takes over leadership within ~2–5 s |
 | Postgres down | readiness fails (`/readyz`), so Traefik stops sending traffic; liveness stays green so the pod isn't restarted in a loop |
 | Store down | woo-mcp's probes don't touch the store, so woo-mcp stays up and returns a tool error; the gateway marks nothing dead that isn't |
 | LLM rate limit | the chat shows "free-tier rate limit reached"; MCP clients are unaffected |
@@ -170,4 +170,14 @@ store namespaces it binds itself into, and a ValidatingAdmissionPolicy rejects a
   server row plus a deploy request; the leader's reconciler runs a deployer Job that installs the generic
   `mcp-server` chart into `mcp-hosted` with a credential the gateway generated, then enables the server. The
   namespace has its own quota and limits, and the admission policy keeps the deployer from touching them.
-
+- **Scaling (SO-7)**: replicas share nothing in memory that matters: the catalog reloads on Postgres NOTIFY, the
+  rate-limit counters are rows (`rate_counters`, one per key per minute, so the limit holds across replicas), and the
+  leader is whoever holds a Postgres advisory lock. A leader that dies releases it with its connection; one that
+  vanishes without closing it is dropped by Postgres TCP keepalives (~8 s); followers retry every 2 s, and a leader
+  that loses its connection stops its duties at once, so two never run together. Production runs two replicas with a
+  PodDisruptionBudget. Measured in-cluster at 50 rps: `tools/list` p95 ≈ 10 ms, gateway overhead on `tools/call` p95
+  ≈ 2–3 ms.
+- **Upgrades and rollback (SO-9)**: every component is a Helm release, images are tagged by git sha, gateway
+  migrations only add (so an older image runs on a newer schema), and the store's setup Job also runs after a
+  rollback. Store data is the one thing Helm can't undo: `make store-upgrade` backs it up first and
+  `make restore-store` restores it. Runbook and what the tests prove: [upgrades-rollback.md](upgrades-rollback.md).

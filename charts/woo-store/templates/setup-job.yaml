@@ -8,7 +8,9 @@ metadata:
   labels:
     {{- include "woo-store.labels" (list . "setup") | nindent 4 }}
   annotations:
-    helm.sh/hook: post-install,post-upgrade
+    # post-rollback too: a rollback re-applies the previous values (title, currency, plugin version) like an
+    # upgrade does; store *data* comes back only with scripts/restore-store.sh (DESIGN §18, D96)
+    helm.sh/hook: post-install,post-upgrade,post-rollback
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation
 spec:

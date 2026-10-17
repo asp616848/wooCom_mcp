@@ -120,6 +120,12 @@ How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provi
   `list_servers`) instead of every tool; the chat switches to it by itself above 40 tools.
 - **Hosted servers**: **Hosted** → *Deploy server* runs an MCP server from a container image (`wmg/`, `ghcr.io/` or
   `docker.io/`) in the `mcp-hosted` namespace with its own credential, quota and NetworkPolicy, and registers it.
+- **Rate limits**: every API key may make 120 tool calls a minute, counted across all gateway replicas; over it,
+  calls are refused with "retry in N s". Admins can give a key its own limit on the **API keys** page.
+- **Two gateways**: `make platform SCALE=1` runs two replicas, as in production. Kill either one, the leader too,
+  during a load test (`make e2e-scale`) and no request fails; the other takes over leadership within seconds.
+- **Upgrades and rollback**: `make store-upgrade` backs up the store first; any release goes back with `helm
+  rollback`, and `make restore-store` brings store data back. Runbook: [docs/upgrades-rollback.md](docs/upgrades-rollback.md).
 
 ## Make targets
 | Target | What it does |
@@ -133,6 +139,9 @@ How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provi
 | `make e2e` | acceptance + isolation tests against the running cluster |
 | `make e2e-stores` | bonus store provisioning tests (creates/deletes `paris` and `tokyo`, ~15 min) |
 | `make e2e-hosted` | hosted MCP server test (deploys and removes `pincode-hosted`, ~1 min) |
+| `make e2e-scale` | two replicas: latency in-cluster, leader killed under load, PDB, rate limit (`make platform SCALE=1` first, ~3 min) |
+| `make e2e-upgrades` | upgrade + rollback of gateway, pincode and store with backup/restore (~2 min) |
+| `make backup-store`, `make restore-store TS=…`, `make store-upgrade` | store backup to `backups/`, restore, backup-then-upgrade |
 | `make vps-bootstrap`, `make prod-up`, `make vps-tunnel` | VPS: k3s + cert-manager, deploy everything with prod values, reopen the API tunnel |
 | `make test-k8s`, `make verify-k8s` | network/PSA/RBAC/SSRF checks; every workload has requests, limits and probes |
 
