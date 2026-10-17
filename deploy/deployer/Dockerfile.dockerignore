@@ -1,0 +1,4 @@
+# Deployer build context = repo root, but only the store chart and the scripts go in (secret-free by construction).
+*
+!charts/woo-store
+!deploy/deployer/scripts

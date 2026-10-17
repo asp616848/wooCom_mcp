@@ -1,6 +1,6 @@
 """Gateway configuration from env (DESIGN §5.2). Invalid env → the process exits with a readable message.
 
-Settings for later phases (provisioning P14) are added with those phases.
+Each phase adds its own settings (P14: store provisioning).
 """
 
 import base64
@@ -52,6 +52,20 @@ class Settings(ServiceSettings):
     llm_api_key: SecretStr | None = None
     tool_search_threshold: int = Field(default=40, ge=1)
 
+    # P14: store provisioning (DESIGN §13). Empty images → disabled (POST /api/stores answers 503).
+    k8s_namespace: str = "mcp-platform"
+    deployer_image: str = ""
+    woo_mcp_image: str = ""
+    store_host_template: str = Field(default="{name}.shop.localhost", pattern=r"\{name\}")
+    store_scheme: str = Field(default="http", pattern=r"^https?$")
+    store_values_env: str = Field(default="local", pattern=r"^(local|prod)$")
+    max_stores_per_user: int = Field(default=2, ge=0, le=50)
+    max_stores_total: int = Field(default=4, ge=0, le=100)
+    provision_timeout_s: int = Field(default=900, ge=120, le=3600)
+    teardown_timeout_s: int = Field(default=600, ge=60, le=3600)
+    provision_concurrency: int = Field(default=3, ge=1, le=10)
+    reconcile_interval_s: float = Field(default=5.0, gt=0, le=60)
+
     @field_validator("credential_encryption_key")
     @classmethod
     def _key_is_32_bytes(cls, value: SecretStr) -> SecretStr:
@@ -69,6 +83,12 @@ class Settings(ServiceSettings):
     def llm_key(self) -> str | None:
         key = self.llm_api_key.get_secret_value().strip() if self.llm_api_key else ""
         return key or None
+
+    def provisioning_enabled(self) -> bool:
+        return bool(self.deployer_image and self.woo_mcp_image)
+
+    def store_host(self, name: str) -> str:
+        return self.store_host_template.replace("{name}", name)
 
     def host_list(self) -> list[str]:
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]

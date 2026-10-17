@@ -1,0 +1,37 @@
+# Bonus-store profile (P14, DESIGN §13.3). Deployer Jobs install with:
+#   -f values-<env>.yaml -f values-bonus.yaml -f /input/values.json   (per-store host, image, Secret, TLS name)
+# Smaller than the main store so MAX_STORES_TOTAL (4) stores fit next to it, on the laptop and on the VPS; the quota is
+# the chart default, sized for exactly these numbers.
+
+mariadb:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+wordpress:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+guardrails:
+  enabled: true
+  quota:
+    requestsCpu: "1"
+    requestsMemory: 1536Mi
+    limitsCpu: "4"
+    limitsMemory: 3Gi
+    pods: "8"
+    pvcs: "3"
+    requestsStorage: 6Gi

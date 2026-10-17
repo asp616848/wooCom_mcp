@@ -122,10 +122,13 @@ networkPolicy:
   # Labels of the Ingress controller pods in kube-system (k3s Traefik; verified in P11).
   traefikPodLabels:
     app.kubernetes.io/name: traefik
+  # Allow Traefik → cert-manager HTTP-01 solver pods (on in prod, where Let's Encrypt issues the store's cert).
+  acmeHttp01Solver: false
   # Excluded from "public internet" egress.
   privateCidrs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
 
-# ResourceQuota + LimitRange (templates added in phase P14).
+# ResourceQuota + LimitRange per store namespace (BR-6). Sized for these defaults (also the bonus-store profile in
+# values-bonus.yaml): requests ≈ 0.4 CPU / 0.9 GiB incl. setup Job + helm test pod; values-prod.yaml raises it for main.
 guardrails:
   enabled: true
   quota:

@@ -1,5 +1,6 @@
 # Production-like (VPS / k3s) overrides (DESIGN §17). `make ENV=prod platform` sets the hosts
-# (<label>.<ip-dashed>.sslip.io), image repositories (GHCR) and kubeApiCIDRs; secrets come from scripts/prod-secrets.sh.
+# (<label>.<ip-dashed>.sslip.io), image repositories (GHCR), kubeApiCIDRs and provisioning.storeHostTemplate
+# ({name}.shop.<ip-dashed>.sslip.io); secrets come from scripts/prod-secrets.sh.
 hosts:
   dashboard: dashboard.example.com
   gateway: gateway.example.com
@@ -28,3 +29,9 @@ gateway:
     enabled: true
   llm:
     model: gemini-3-flash-preview   # PLAN P10.1 rule, 2026-10-10
+
+# Bonus stores get https + a Let's Encrypt cert each (woo-store values-prod.yaml), on the prod store profile.
+provisioning:
+  storeHostTemplate: "{name}.shop.example.com"
+  storeScheme: https
+  storeValuesEnv: prod

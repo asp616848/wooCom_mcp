@@ -60,6 +60,11 @@ cp .env.prod.example .env.prod      # VPS_IP, GH_OWNER, GEMINI_API_KEY (optional
 KUBECONFIG=~/.kube/wmg-vps.yaml E2E_SCHEME=https E2E_DOMAIN=<ip-dashed>.sslip.io make e2e
 ```
 Runs the acceptance and isolation suite against the VPS over HTTPS. Chat tests need a Gemini key with credit.
+Bonus stores (`paris.shop.<ip-dashed>.sslip.io`, a Let's Encrypt certificate each):
+```bash
+KUBECONFIG=~/.kube/wmg-vps.yaml E2E_SCHEME=https E2E_DOMAIN=<ip-dashed>.sslip.io make e2e-stores
+```
+Let's Encrypt allows 5 certificates per week for the same host name, so avoid recreating one store name many times.
 
 ## Day 2
 | Task | Command |

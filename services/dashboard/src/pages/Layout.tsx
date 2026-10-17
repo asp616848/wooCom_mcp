@@ -6,6 +6,7 @@ import {
   Plug,
   ScrollText,
   Server,
+  Store,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ const NAV: NavItem[] = [
   { to: '/audit', label: 'Audit log', icon: ScrollText, roles: ['admin', 'member'] },
   { to: '/connect', label: 'Connect', icon: Plug, roles: ['admin', 'member'] },
   { to: '/chat', label: 'Chat', icon: MessageSquare, roles: ['admin', 'member'] },
+  { to: '/stores', label: 'Stores', icon: Store, roles: ['admin', 'member'] },
 ];
 
 export function Layout() {

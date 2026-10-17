@@ -1,0 +1,52 @@
+{{- if .Values.provisioning.enabled }}
+{{- /*
+SO-6 / DESIGN §8.6: whatever RBAC says, every write by wmg-deployer must target a store-<name> namespace (or
+mcp-hosted, SO-5) and never store-main. Cluster-scoped objects other than those Namespaces are denied. Self access
+reviews (`kubectl auth can-i`) are excluded: they write nothing.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: wmg-deployer-scope
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE", "CONNECT"]
+        resources: ["*/*"]  # every resource and subresource
+        scope: "*"
+    excludeResourceRules:
+      - apiGroups: ["authorization.k8s.io", "authentication.k8s.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["*"]
+  matchConditions:
+    - name: is-deployer
+      expression: "request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:wmg-deployer'"
+  variables:
+    - name: target
+      expression: >-
+        request.namespace != '' ? request.namespace :
+        (request.kind.group == '' && request.kind.kind == 'Namespace' ? request.name : '')
+  validations:
+    - expression: >-
+        variables.target.matches('^(store-[a-z][a-z0-9]{2,15}|mcp-hosted)$') && variables.target != 'store-main'
+      messageExpression: >-
+        'wmg-deployer may only change store-<name> namespaces, not ' +
+        (variables.target == '' ? 'cluster-scoped ' + request.kind.kind : variables.target)
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: wmg-deployer-scope
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+spec:
+  policyName: wmg-deployer-scope
+  validationActions: ["Deny"]
+{{- end }}

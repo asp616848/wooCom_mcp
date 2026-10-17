@@ -27,6 +27,8 @@ jobs:
           - { svc: mcp-gst, context: ., dockerfile: services/mcp-gst/Dockerfile }
           - { svc: mcp-pincode, context: ., dockerfile: services/mcp-pincode/Dockerfile }
           - { svc: dashboard, context: services/dashboard, dockerfile: services/dashboard/Dockerfile }
+          # P14: helm + kubectl + the woo-store chart (context filtered by deploy/deployer/Dockerfile.dockerignore)
+          - { svc: deployer, context: ., dockerfile: deploy/deployer/Dockerfile }
     steps:
       - uses: actions/checkout@v7
       - id: meta

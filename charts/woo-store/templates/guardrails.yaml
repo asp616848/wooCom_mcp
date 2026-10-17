@@ -1,0 +1,36 @@
+{{- if .Values.guardrails.enabled }}
+{{- /* BR-6 / DESIGN §4.1: per-namespace caps (one store per namespace). LimitRange defaults apply to any container
+without its own requests/limits (e.g. cert-manager's HTTP-01 solver), so the quota never blocks it. */}}
+{{- $q := .Values.guardrails.quota }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ .Release.Name }}-quota
+  labels:
+    {{- include "woo-store.labels" (list . "guardrails") | nindent 4 }}
+spec:
+  hard:
+    requests.cpu: {{ $q.requestsCpu | quote }}
+    requests.memory: {{ $q.requestsMemory | quote }}
+    limits.cpu: {{ $q.limitsCpu | quote }}
+    limits.memory: {{ $q.limitsMemory | quote }}
+    pods: {{ $q.pods | quote }}
+    persistentvolumeclaims: {{ $q.pvcs | quote }}
+    requests.storage: {{ $q.requestsStorage | quote }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ .Release.Name }}-limits
+  labels:
+    {{- include "woo-store.labels" (list . "guardrails") | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        {{- toYaml .Values.guardrails.limitRange.defaultRequest | nindent 8 }}
+      default:
+        {{- toYaml .Values.guardrails.limitRange.default | nindent 8 }}
+      max:
+        {{- toYaml .Values.guardrails.limitRange.max | nindent 8 }}
+{{- end }}

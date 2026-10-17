@@ -45,7 +45,8 @@ networkPolicy:
   # Labels of the Ingress controller pods in kube-system (k3s Traefik; verified in P11).
   traefikPodLabels:
     app.kubernetes.io/name: traefik
-  # Kubernetes API endpoint IPs (/32 each) for the gateway's egress; set per environment (values-local / prod script):
+  # Kubernetes API endpoint IPs (/32 each) for gateway + deployer egress. `make platform` looks them up on every
+  # install (k3d's address changes when Docker restarts):
   # kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
   #   -o jsonpath='{.items[0].endpoints[*].addresses[*]}'
   kubeApiCIDRs: []
@@ -96,6 +97,26 @@ gateway:
   # PodDisruptionBudget (minAvailable 1); enable when replicas > 1 (prod).
   pdb:
     enabled: false
+
+# Bonus store provisioning (P14, DESIGN §13). The gateway's leader runs deployer Jobs (image below, SA wmg-deployer,
+# admission policy wmg-deployer-scope). Store hosts: storeHostTemplate with {name}; stores install with
+# values-<storeValuesEnv>.yaml + values-bonus.yaml of the woo-store chart baked into the deployer image.
+provisioning:
+  enabled: true
+  deployerImage:
+    repository: wmg/deployer
+    # Required: set by `make platform` from .image-tag.
+    tag: ""
+  wooMcpImage:
+    repository: wmg/woo-mcp
+    # Required: set by `make platform` from .image-tag.
+    tag: ""
+  storeHostTemplate: "{name}.shop.localhost"
+  storeScheme: http
+  storeValuesEnv: local
+  maxStoresPerUser: 2
+  maxStoresTotal: 4
+  provisionTimeoutS: 900
 
 dashboard:
   image:

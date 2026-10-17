@@ -103,6 +103,14 @@ as the signed-in user with credential type `chat_agent`.
 - Add a server with URL `http://169.254.169.254/`: rejected by the SSRF guard.
 - **Audit log**: every call with user, tool, outcome and duration.
 
+### Create more stores (bonus)
+**Stores** → *Create store* → e.g. `paris`. The gateway runs a deployer Job that installs the same `woo-store` chart into
+namespace `store-paris` (own database, volumes, Secrets, NetworkPolicies, quota) and registers its MCP server as
+`woo-paris`; the store opens at http://paris.shop.localhost and its tools appear as `woo-paris__*` in every client
+(about 3–6 minutes). Each user may have 2 stores, 4 in total. Deleting a store removes its tools first, then the
+namespace and its data. Ask the chat to *"Compare today's orders across paris and tokyo"* once both have an order.
+How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provisioning).
+
 ## Make targets
 | Target | What it does |
 |---|---|
@@ -113,6 +121,7 @@ as the signed-in user with credential type `chat_agent`.
 | `make status`, `make admin-password`, `make store-admin-password` | inspect |
 | `make lint`, `make typecheck`, `make test`, `make test-integration` | checks (integration tests start Postgres in Docker) |
 | `make e2e` | acceptance + isolation tests against the running cluster |
+| `make e2e-stores` | bonus store provisioning tests (creates/deletes `paris` and `tokyo`, ~15 min) |
 | `make vps-bootstrap`, `make prod-up`, `make vps-tunnel` | VPS: k3s + cert-manager, deploy everything with prod values, reopen the API tunnel |
 | `make test-k8s`, `make verify-k8s` | network/PSA/RBAC/SSRF checks; every workload has requests, limits and probes |
 

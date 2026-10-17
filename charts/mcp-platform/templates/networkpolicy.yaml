@@ -12,7 +12,7 @@ spec:
   policyTypes: ["Ingress", "Egress"]
 ---
 # Gateway: Traefik in; out to Postgres, MCP upstreams (store / upstreams / hosted namespaces by role label), DNS,
-# the Kubernetes API (deployer Jobs, P14) and the public internet :443 (LLM, external MCP servers; SSRF-guarded too).
+# the Kubernetes API (creates deployer Jobs, P14) and the public internet :443 (LLM, external MCP servers; SSRF-guarded too).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -82,6 +82,43 @@ spec:
               {{- toYaml $np.privateCidrs | nindent 14 }}
       ports:
         - {port: 443, protocol: TCP}
+{{- if .Values.provisioning.enabled }}
+---
+# Deployer Jobs (P14): only the Kubernetes API and DNS (charts are baked into the image); no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-deployer
+  labels:
+    {{- include "mcp-platform.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: deployer
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    {{- if $np.kubeApiCIDRs }}
+    - to:
+        {{- range $np.kubeApiCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - {port: 6443, protocol: TCP}
+        - {port: 443, protocol: TCP}
+    {{- end }}
+{{- end }}
 ---
 # Dashboard (static nginx): Traefik in; no egress (/api goes Traefik → gateway directly).
 apiVersion: networking.k8s.io/v1

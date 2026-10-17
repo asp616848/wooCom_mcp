@@ -18,6 +18,7 @@ import { MembersPage } from '@/pages/MembersPage';
 import { NewServerPage } from '@/pages/servers/NewServerPage';
 import { ServerDetailPage } from '@/pages/servers/ServerDetailPage';
 import { ServersPage } from '@/pages/servers/ServersPage';
+import { StoresPage } from '@/pages/stores/StoresPage';
 
 // DESIGN §11: a 401 anywhere means the session is gone → `me` becomes null and the layout redirects to /login.
 // Failed mutations show a toast unless the component shows the error itself (`meta: { silent: true }`).
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       { path: 'audit', element: <AuditPage /> },
       { path: 'connect', element: <ConnectPage /> },
       { path: 'chat', element: <ChatPage /> },
+      { path: 'stores', element: <StoresPage /> },
       { path: '*', element: <Navigate to="/servers" replace /> },
     ],
   },

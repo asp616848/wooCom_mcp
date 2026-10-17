@@ -164,4 +164,29 @@ spec:
         - {port: 80, protocol: TCP}
     {{- include "woo-store.dnsEgress" . | nindent 4 }}
 {{- end }}
+{{- if $np.acmeHttp01Solver }}
+---
+# cert-manager runs its HTTP-01 solver pod in this namespace while a certificate is issued; Traefik must reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $rel }}-acme-http01-solver
+  labels:
+    {{- include "woo-store.labels" (list . "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.traefikPodLabels | nindent 14 }}
+      ports:
+        - {port: 8089, protocol: TCP}
+{{- end }}
 {{- end }}

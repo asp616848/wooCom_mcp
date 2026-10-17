@@ -3,7 +3,7 @@ name = "wmg-gateway"
 version = "0.1.0"
 description = "Woo MCP Gateway: one authenticated MCP endpoint in front of many MCP servers, plus the dashboard API"
 requires-python = ">=3.14,<3.15"
-# Further pins arrive with the phase that uses them (kubernetes: P14), per DECISIONS §Versions.
+# Pins per DECISIONS §Versions.
 dependencies = [
     "wmg-common",
     "mcp==2.3.0",
@@ -16,6 +16,7 @@ dependencies = [
     "cryptography==50.0.2",
     "tzdata==2026.4",
     "openai==3.24.0",
+    "kubernetes==36.0.3",
 ]
 
 [tool.uv.sources]
