@@ -46,9 +46,14 @@ create_once "$PLATFORM_NS" platform-credentials \
 
 key=$(envval GEMINI_API_KEY)
 if [ -n "$key" ]; then
-  printf '%s' "$key" | kubectl create secret generic platform-llm -n "$PLATFORM_NS" --from-file=api-key=/dev/stdin \
+  # D92: GEMINI_API_KEY_2 (optional) is the chat agent's fallback key
+  key2=$(envval GEMINI_API_KEY_2)
+  dir=$(mktemp -d); (umask 077; printf '%s' "$key" > "$dir/api-key"
+    if [ -n "$key2" ]; then printf '%s' "$key2" > "$dir/api-key-fallback"; fi)
+  kubectl create secret generic platform-llm -n "$PLATFORM_NS" --from-file="$dir" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  echo "applied $PLATFORM_NS/platform-llm"
+  rm -rf "$dir"
+  echo "applied $PLATFORM_NS/platform-llm${key2:+ (with fallback key)}"
 else
   echo "WARNING: GEMINI_API_KEY not set in $ENV_FILE - chat will be unavailable"
 fi

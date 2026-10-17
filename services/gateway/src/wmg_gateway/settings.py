@@ -50,6 +50,7 @@ class Settings(ServiceSettings):
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_model: str = "gemini-3-flash-preview"
     llm_api_key: SecretStr | None = None
+    llm_api_key_fallback: SecretStr | None = None  # D92: one retry on this key when the primary fails
     tool_search_threshold: int = Field(default=40, ge=1)
 
     # P14: store provisioning (DESIGN §13). Empty images → disabled (POST /api/stores answers 503).
@@ -83,6 +84,14 @@ class Settings(ServiceSettings):
     def llm_key(self) -> str | None:
         key = self.llm_api_key.get_secret_value().strip() if self.llm_api_key else ""
         return key or None
+
+    def llm_keys(self) -> list[str]:
+        """Primary key first, then the fallback (D92); empty when chat is not configured."""
+        primary = self.llm_key()
+        if primary is None:
+            return []
+        fallback = self.llm_api_key_fallback.get_secret_value().strip() if self.llm_api_key_fallback else ""
+        return [primary, fallback] if fallback and fallback != primary else [primary]
 
     def provisioning_enabled(self) -> bool:
         return bool(self.deployer_image and self.woo_mcp_image)

@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx2
 import mcp_types as types
+import openai
 import pytest
 from mcp import MCPError
 from openai import RateLimitError
@@ -183,7 +184,7 @@ class FakeMcp:
         return self.result
 
 
-async def run(llm: FakeLlm, mcp: FakeMcp) -> list[tuple[str, dict[str, Any]]]:
+async def run(llm: FakeLlm | chat.LlmKeys, mcp: FakeMcp) -> list[tuple[str, dict[str, Any]]]:
     events: list[tuple[str, dict[str, Any]]] = []
 
     async def emit(event: str, data: dict[str, Any]) -> None:
@@ -191,7 +192,8 @@ async def run(llm: FakeLlm, mcp: FakeMcp) -> list[tuple[str, dict[str, Any]]]:
 
     history = [{"role": "user", "content": "What orders came in today?"}]
     now = datetime(2026, 10, 16, 9, 30, tzinfo=UTC)
-    await chat.run_turn(mcp, llm, "gemini-test", history, emit, now=now)  # type: ignore[arg-type]
+    keys = llm if isinstance(llm, chat.LlmKeys) else chat.LlmKeys(llm)  # type: ignore[arg-type]
+    await chat.run_turn(mcp, keys, "gemini-test", history, emit, now=now)  # type: ignore[arg-type]
     return events
 
 
@@ -301,3 +303,79 @@ def test_tool_content_structured_and_truncated() -> None:
     assert chat.tool_content(structured) == '{"gst": 180}'
     long = types.CallToolResult(content=[types.TextContent(type="text", text="x" * 10_000)])
     assert len(chat.tool_content(long)) == chat.TOOL_CONTENT_LIMIT
+
+
+# ---------------------------------------------------------------------------------- fallback key (D92)
+
+LLM_URL = "https://llm.test/chat/completions"
+
+
+def status_error(status: int, message: str = "boom") -> openai.APIStatusError:
+    response = httpx2.Response(status, request=httpx2.Request("POST", LLM_URL))
+    return openai.APIStatusError(message, response=response, body=None)
+
+
+def rate_limited() -> RateLimitError:
+    response = httpx2.Response(429, request=httpx2.Request("POST", LLM_URL))
+    return RateLimitError("quota", response=response, body=None)
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (rate_limited(), True),
+        (status_error(500), True),
+        (status_error(503), True),
+        (status_error(401), True),
+        (status_error(403), True),
+        (status_error(400, "Please pass a valid API key"), True),  # Gemini's answer to a bad key
+        (status_error(400, "API key expired. Please renew the API key."), True),
+        (status_error(400, "Invalid JSON payload"), False),
+        (status_error(404, "model not found"), False),
+        (openai.APIConnectionError(request=httpx2.Request("POST", LLM_URL)), True),
+        (openai.APITimeoutError(request=httpx2.Request("POST", LLM_URL)), True),
+    ],
+)
+def test_switchable(exc: openai.APIError, expected: bool) -> None:
+    assert chat.switchable(exc) is expected
+
+
+@pytest.mark.anyio
+async def test_fallback_key_retries_once_and_stays_for_the_turn() -> None:
+    primary = FakeLlm(rate_limited())
+    fallback = FakeLlm(completion(calls=[("c1", TOOL.name, "{}")]), completion("Two orders today."))
+    keys = chat.LlmKeys(primary, fallback)  # type: ignore[arg-type]
+    events = await run(keys, FakeMcp())
+    assert events[-2:] == [
+        ("answer", {"text": "Two orders today."}),
+        ("done", {"llmCalls": 2, "toolCalls": 1}),
+    ]
+    # one failed attempt on the primary; the same request then went to the fallback, which kept the turn
+    assert len(primary.requests) == 1 and len(fallback.requests) == 2
+    assert primary.requests[0] == fallback.requests[0]
+    assert keys.active == 1
+
+
+@pytest.mark.anyio
+async def test_fallback_failing_too_reports_its_error() -> None:
+    primary, fallback = FakeLlm(status_error(503)), FakeLlm(rate_limited())
+    events = await run(chat.LlmKeys(primary, fallback), FakeMcp())  # type: ignore[arg-type]
+    assert events == [("error", {"message": chat.RATE_LIMITED}), ("done", {"llmCalls": 1, "toolCalls": 0})]
+    assert len(primary.requests) == len(fallback.requests) == 1
+
+
+@pytest.mark.anyio
+async def test_bad_request_is_not_retried_on_the_fallback() -> None:
+    primary, fallback = FakeLlm(status_error(400, "Invalid JSON payload")), FakeLlm(completion("unused"))
+    events = await run(chat.LlmKeys(primary, fallback), FakeMcp())  # type: ignore[arg-type]
+    assert events[0] == ("error", {"message": "The LLM request failed: Invalid JSON payload"})
+    assert fallback.requests == []
+
+
+@pytest.mark.anyio
+async def test_mid_turn_failure_switches_with_the_full_history() -> None:
+    primary = FakeLlm(completion(calls=[("c1", TOOL.name, "{}")]), status_error(500))
+    fallback = FakeLlm(completion("Done."))
+    events = await run(chat.LlmKeys(primary, fallback), FakeMcp())  # type: ignore[arg-type]
+    assert events[-2:] == [("answer", {"text": "Done."}), ("done", {"llmCalls": 2, "toolCalls": 1})]
+    assert fallback.requests[0] == primary.requests[1]  # tool call + tool result included
