@@ -330,7 +330,8 @@ def test_08_AT_T2_disable_hides_tools(world: World) -> None:
     gst = server_id(rohan, "gst")
     assert rohan.patch(f"/api/servers/{gst}", json={"enabled": False}).status_code == 200
     try:
-        assert not any(n.startswith("gst__") for n in mcp_tools(key))
+        # NFR-P4: gone within 1 s on every replica (the other one learns it through Postgres NOTIFY)
+        eventually(lambda: not any(n.startswith("gst__") for n in mcp_tools(key)), within=1.0, step=0.1)
         with pytest.raises(MCPError) as exc:
             mcp_call(key, "gst__calculate_gst", {"amount": 100, "rate": 18})
         assert exc.value.error.code == -32602
