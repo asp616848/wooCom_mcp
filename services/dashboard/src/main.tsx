@@ -10,6 +10,7 @@ import { ApiError } from '@/lib/api';
 import { AuditPage } from '@/pages/AuditPage';
 import { ChatPage } from '@/pages/ChatPage';
 import { ConnectPage } from '@/pages/ConnectPage';
+import { InsightsPage } from '@/pages/InsightsPage';
 import { InvitePage } from '@/pages/InvitePage';
 import { KeysPage } from '@/pages/keys/KeysPage';
 import { Layout } from '@/pages/Layout';
@@ -51,6 +52,7 @@ const router = createBrowserRouter([
       { path: 'members', element: <MembersPage /> },
       { path: 'keys', element: <KeysPage /> },
       { path: 'audit', element: <AuditPage /> },
+      { path: 'insights', element: <InsightsPage /> },
       { path: 'connect', element: <ConnectPage /> },
       { path: 'chat', element: <ChatPage /> },
       { path: 'stores', element: <StoresPage /> },

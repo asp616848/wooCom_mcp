@@ -496,3 +496,65 @@ async def test_SO2_01_policy_toggle(gateway_factory: Any, upstreams: Any) -> Non
 
 async def _lacks(gw: Any, key: str, name: str) -> bool:
     return name not in await tool_names(gw, key)
+
+
+def _metric(text: str, name: str, **labels: str) -> float:
+    """One sample from Prometheus text output (0 if absent)."""
+    want = ",".join(f'{k}="{v}"' for k, v in labels.items())
+    for line in text.splitlines():
+        sample, _, value = line.rpartition(" ")
+        if sample == (f"{name}{{{want}}}" if want else name):
+            return float(value)
+    return 0.0
+
+
+async def test_SO8_01_metrics_and_insights_match_the_audit(
+    gateway_factory: Any, upstreams: Any, database_url: str
+) -> None:
+    gw = gateway_factory()
+    async with session(gw) as admin:
+        await register(admin, "fx-modern", upstreams.modern.url + "/mcp")
+        key = await new_key(admin)
+        await eventually(lambda: has_tools(gw, key, "fx-modern__echo"))
+        before = (await admin.get("/metrics")).text
+        async with mcp(gw, key) as c:
+            for i in range(3):
+                assert not (await c.call_tool("fx-modern__echo", {"text": str(i)})).is_error
+            assert (await c.call_tool("fx-modern__fail", {})).is_error
+        after = (await admin.get("/metrics")).text
+        for outcome, n in (("success", 3), ("tool_error", 1)):
+            delta = _metric(after, "wmg_tool_calls_total", outcome=outcome, server="fx-modern") - _metric(
+                before, "wmg_tool_calls_total", outcome=outcome, server="fx-modern"
+            )
+            assert delta == n, (outcome, delta)
+        assert _metric(after, "wmg_upstream_up", server="fx-modern") == 1
+        assert _metric(after, "wmg_upstream_tools", server="fx-modern") == 4
+        assert _metric(after, "wmg_tools_list_duration_seconds_count") >= 1
+        assert 'wmg_tool_call_duration_seconds_bucket{le="0.01",server="fx-modern"}' in after
+
+        r = await admin.get("/api/insights", params={"window": "1h"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        conn = await db(database_url)
+        try:
+            expected = await conn.fetchrow(
+                "SELECT count(*) AS calls, count(*) FILTER (WHERE outcome <> 'success') AS errors "
+                "FROM audit_log WHERE method = 'tools/call' AND server_slug = 'fx-modern'"
+            )
+        finally:
+            await conn.close()
+        (server,) = body["servers"]
+        assert (server["serverSlug"], server["calls"], server["errors"]) == (
+            "fx-modern",
+            expected["calls"],
+            expected["errors"],
+        )
+        assert server["calls"] == 4 and server["errorRate"] == 0.25
+        assert server["outcomes"] == {"success": 3, "tool_error": 1}
+        assert server["p95Ms"] >= server["p50Ms"] >= 0
+        assert body["calls"] == 4 and body["window"] == "1h"
+        assert [t["exposedName"] for t in body["tools"]] == ["fx-modern__echo", "fx-modern__fail"]
+        (failure,) = body["failures"]
+        assert failure["serverSlug"] == "fx-modern" and failure["outcome"] == "tool_error"
+        assert failure["count"] == 1 and failure["lastSeen"].endswith("Z")
+        assert (await admin.get("/api/insights", params={"window": "2h"})).status_code == 422

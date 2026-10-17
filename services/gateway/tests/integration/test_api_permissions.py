@@ -39,6 +39,7 @@ ADMIN_ONLY = [
     ("PATCH", f"/api/servers/{ID}", {"name": "Z"}),
     ("PUT", f"/api/servers/{ID}/tools/echo/policy", {"adminOnly": True}),
     ("DELETE", f"/api/servers/{ID}", None),
+    ("GET", "/api/insights", None),
 ]
 
 

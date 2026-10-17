@@ -79,6 +79,7 @@ export interface McpServer {
   authHeaderName?: string | null;
   hasCredential?: boolean;
   timeoutMs?: number;
+  lastOkAt?: string | null;
   lastErrorCode?: string | null;
   lastError?: string | null;
   createdAt?: string;
@@ -265,4 +266,28 @@ export const storesApi = {
   create: (name: string) => api<{ store: Store }>('/stores', 'POST', { name }),
   retry: (name: string) => api<{ store: Store }>(`/stores/${encodeURIComponent(name)}/retry`, 'POST'),
   remove: (name: string) => api<{ store: Store }>(`/stores/${encodeURIComponent(name)}`, 'DELETE'),
+};
+
+// ---- insights (SO-8, DESIGN §16) ----
+export type InsightsWindow = '1h' | '24h' | '7d';
+
+export interface Insights {
+  window: InsightsWindow;
+  calls: number;
+  errorRate: number;
+  servers: {
+    serverSlug: string;
+    calls: number;
+    errors: number;
+    errorRate: number;
+    p50Ms: number;
+    p95Ms: number;
+    outcomes: Partial<Record<Outcome, number>>;
+  }[];
+  tools: { exposedName: string; calls: number; errorRate: number; p95Ms: number }[];
+  failures: { serverSlug: string; outcome: Outcome; message: string; count: number; lastSeen: string }[];
+}
+
+export const insightsApi = {
+  get: (window: InsightsWindow) => api<Insights>(`/insights?window=${window}`),
 };
