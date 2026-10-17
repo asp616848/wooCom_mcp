@@ -442,3 +442,57 @@ async def test_delegated_jwt_and_disabled_user(
         assert row["credential_id"] == f"chat:{rohan_id}" and row["error_message"] == "User disabled"
     finally:
         await conn.close()
+
+
+async def test_SO2_01_policy_toggle(gateway_factory: Any, upstreams: Any) -> None:
+    """SO2-01: an admin-only tool is hidden from and rejected for members, open to admins; a toggle through
+    the API takes effect within 1 s on every replica."""
+    gw, other = gateway_factory(), gateway_factory()
+    async with session(gw) as admin:
+        server = await register(admin, "fx-modern", upstreams.modern.url + "/mcp")
+        admin_key = await new_key(admin)
+        invite = await admin.post("/api/invites", json={"email": "ritika@example.com", "role": "member"})
+        token = invite.json()["inviteUrl"].rsplit("/", 1)[1]
+        async with httpx2.AsyncClient(base_url=gw.url, headers=CSRF) as anon:
+            r = await anon.post(
+                f"/api/invites/{token}/accept", json={"name": "Ritika", "password": "ritika-password-1"}
+            )
+            assert r.status_code == 200
+        async with session(gw, {"email": "ritika@example.com", "password": "ritika-password-1"}) as member:
+            member_key = await new_key(member)
+            await eventually(lambda: has_tools(other, member_key, "fx-modern__echo"))
+            policy = f"/api/servers/{server['id']}/tools/echo/policy"
+
+            r = await admin.put(policy, json={"adminOnly": True})
+            assert r.status_code == 200, r.text
+            assert r.json()["policy"] == {**r.json()["policy"], "toolName": "echo", "adminOnly": True}
+            # the other replica learns it through LISTEN/NOTIFY
+            await eventually(lambda: _lacks(other, member_key, "fx-modern__echo"), within=1.0)
+            tools = (await member.get(f"/api/servers/{server['id']}/tools")).json()["tools"]
+            assert "fx-modern__echo" not in [t["exposedName"] for t in tools]
+            admin_tools = (await admin.get(f"/api/servers/{server['id']}/tools")).json()["tools"]
+            assert {"exposedName": "fx-modern__echo", "adminOnly": True}.items() <= next(
+                t for t in admin_tools if t["name"] == "echo"
+            ).items()
+            async with mcp(other, member_key) as c:
+                with pytest.raises(MCPError) as err:
+                    await c.call_tool("fx-modern__echo", {"text": "x"})
+            assert err.value.error.code == -32010
+            async with mcp(other, admin_key) as c:
+                assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+
+            r = await admin.put(policy, json={"adminOnly": False})
+            assert r.status_code == 200 and r.json()["policy"]["adminOnly"] is False
+            await eventually(lambda: has_tools(other, member_key, "fx-modern__echo"), within=1.0)
+            async with mcp(other, member_key) as c:
+                assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+
+            assert (await member.put(policy, json={"adminOnly": True})).status_code == 403
+        missing = await admin.put(f"/api/servers/{server['id']}/tools/nope/policy", json={"adminOnly": True})
+        assert missing.status_code == 404 and missing.json()["error"]["message"] == "Tool not found"
+        bad = await admin.put(policy, json={"adminOnly": "yes please"})
+        assert bad.status_code == 422
+
+
+async def _lacks(gw: Any, key: str, name: str) -> bool:
+    return name not in await tool_names(gw, key)

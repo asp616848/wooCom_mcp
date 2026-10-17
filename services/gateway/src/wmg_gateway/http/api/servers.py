@@ -1,4 +1,5 @@
-"""Upstream MCP servers (DESIGN §7.3, §7.2): list, tools, test connection, create, update, delete.
+"""Upstream MCP servers (DESIGN §7.3, §7.2): list, tools, tool policies (SO-2), test connection, create,
+update, delete.
 
 Credentials are write-only: they are encrypted on the way in (AES-GCM, AAD = server id) and never returned.
 URLs pass the SSRF policy (§8.4). Every change NOTIFYs `catalog_changed`, so all replicas reload; a create or
@@ -172,6 +173,21 @@ class ToolsEnvelope(ApiModel):
     tools: list[ToolOut]
 
 
+class PolicyIn(ApiModel):
+    admin_only: bool
+
+
+class PolicyOut(ApiModel):
+    server_id: uuid.UUID
+    tool_name: str
+    admin_only: bool
+    updated_at: datetime
+
+
+class PolicyEnvelope(ApiModel):
+    policy: PolicyOut
+
+
 _LIST_SQL = (
     "SELECT s.*, "
     "(SELECT count(*) FROM server_tools t LEFT JOIN tool_policies p "
@@ -262,6 +278,35 @@ async def list_server_tools(server_id: uuid.UUID, user: CurrentUser, pool: Pool)
             admin,
         )
     return ToolsEnvelope(tools=[ToolOut.model_validate(dict(r)) for r in rows])
+
+
+@router.put("/{server_id}/tools/{tool_name}/policy")
+async def set_tool_policy(
+    server_id: uuid.UUID, tool_name: str, body: PolicyIn, admin: AdminUser, pool: Pool
+) -> PolicyEnvelope:
+    """SO-2: mark one tool admin-only (or open it to members). Every replica reloads on the NOTIFY."""
+    async with pool.acquire() as conn, conn.transaction():
+        slug = await conn.fetchval("SELECT slug FROM mcp_servers WHERE id = $1", server_id)
+        if slug is None:
+            raise AppError(404, "NOT_FOUND", "Server not found")
+        if not await conn.fetchval(
+            "SELECT 1 FROM server_tools WHERE server_id = $1 AND name = $2", server_id, tool_name
+        ):
+            raise AppError(404, "NOT_FOUND", "Tool not found")
+        row = await conn.fetchrow(
+            "INSERT INTO tool_policies (server_id, tool_name, admin_only, updated_by) "
+            "VALUES ($1, $2, $3, $4) "
+            "ON CONFLICT (server_id, tool_name) DO UPDATE SET admin_only = EXCLUDED.admin_only, "
+            "updated_by = EXCLUDED.updated_by, updated_at = now() "
+            "RETURNING server_id, tool_name, admin_only, updated_at",
+            server_id,
+            tool_name,
+            body.admin_only,
+            admin.id,
+        )
+        await notify(conn, "catalog_changed", str(server_id))
+    log.info("tool policy set", slug=slug, tool=tool_name, admin_only=body.admin_only, by=str(admin.id))
+    return PolicyEnvelope(policy=PolicyOut.model_validate(dict(row)))
 
 
 @router.post("/test")
