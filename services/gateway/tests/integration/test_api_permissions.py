@@ -37,6 +37,7 @@ ADMIN_ONLY = [
     ("POST", "/api/servers/test", {"url": "http://x.mcp-upstreams.svc/mcp", "authType": "none"}),
     ("POST", "/api/servers", {"slug": "zz", "name": "Z", "url": "http://x.mcp-upstreams.svc/mcp"}),
     ("PATCH", f"/api/servers/{ID}", {"name": "Z"}),
+    ("PUT", f"/api/servers/{ID}/tools/echo/policy", {"adminOnly": True}),
     ("DELETE", f"/api/servers/{ID}", None),
 ]
 

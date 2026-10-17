@@ -121,7 +121,19 @@ export const serversApi = {
   create: (body: ServerInput) => api<{ server: McpServer }>('/servers', 'POST', body),
   update: (id: string, body: ServerInput) => api<{ server: McpServer }>(`/servers/${id}`, 'PATCH', body),
   remove: (id: string) => api<undefined>(`/servers/${id}`, 'DELETE'),
+  /** SO-2: admin-only on/off for one tool (by its upstream name). */
+  setPolicy: (id: string, tool: string, adminOnly: boolean) =>
+    api<{ policy: ToolPolicy }>(`/servers/${id}/tools/${encodeURIComponent(tool)}/policy`, 'PUT', {
+      adminOnly,
+    }),
 };
+
+export interface ToolPolicy {
+  serverId: string;
+  toolName: string;
+  adminOnly: boolean;
+  updatedAt: string;
+}
 
 // ---- keys ----
 export interface ApiKey {

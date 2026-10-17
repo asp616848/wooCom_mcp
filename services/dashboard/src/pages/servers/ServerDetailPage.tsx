@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Table, Td, Th } from '@/components/ui/table';
 import { toast } from '@/components/ui/toast';
-import { serversApi, type McpServer, type ServerInput } from '@/lib/api';
+import { serversApi, type McpServer, type ServerInput, type ServerTool } from '@/lib/api';
 import { useServers } from '@/pages/servers/hooks';
 import { ServerForm } from '@/pages/servers/ServerForm';
 
@@ -110,7 +110,9 @@ export function ServerDetailPage() {
                     </pre>
                   </details>
                 </Td>
-                <Td>{tool.adminOnly ? <Badge tone="brand">Admins only</Badge> : <Badge>Everyone</Badge>}</Td>
+                <Td>
+                  {isAdmin ? <PolicyToggle serverId={server.id} tool={tool} /> : <Badge>Everyone</Badge>}
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -205,6 +207,40 @@ function AdminActions({ server }: { server: McpServer }) {
         </div>
       </Dialog>
     </>
+  );
+}
+
+/** SO-2: admins flip a tool between "Everyone" and "Admins only"; all gateways apply it within a second. */
+function PolicyToggle({ serverId, tool }: { serverId: string; tool: ServerTool }) {
+  const queryClient = useQueryClient();
+  const change = useMutation({
+    mutationFn: (adminOnly: boolean) => serversApi.setPolicy(serverId, tool.name, adminOnly),
+    onSuccess: ({ policy }) => {
+      void queryClient.invalidateQueries({ queryKey: ['servers'] });
+      toast.success(`${tool.exposedName}: ${policy.adminOnly ? 'admins only' : 'everyone'}`);
+    },
+  });
+  const adminOnly = change.isPending ? !tool.adminOnly : tool.adminOnly;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={adminOnly}
+      aria-label={`Admins only: ${tool.exposedName}`}
+      disabled={change.isPending}
+      onClick={() => change.mutate(!tool.adminOnly)}
+      className="inline-flex items-center gap-2 whitespace-nowrap disabled:opacity-60"
+      title="Admins only: hidden from members, and member calls are rejected"
+    >
+      <span
+        className={`relative h-5 w-9 rounded-full transition-colors ${adminOnly ? 'bg-brand' : 'bg-zinc-300'}`}
+      >
+        <span
+          className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${adminOnly ? 'left-4.5' : 'left-0.5'}`}
+        />
+      </span>
+      {adminOnly ? <Badge tone="brand">Admins only</Badge> : <Badge>Everyone</Badge>}
+    </button>
   );
 }
 
