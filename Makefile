@@ -11,12 +11,14 @@ PY_SRC       = $(filter-out services/dashboard/%,$(wildcard packages/*/src/* ser
 CHARTS       = $(wildcard charts/*)
 DASHBOARD   := services/dashboard
 TAG_FILE    := .image-tag
-# every services/<name>/Dockerfile becomes image wmg/<name>; override to build a subset: make images SERVICES=woo-mcp
-SERVICES    ?= $(patsubst services/%/Dockerfile,%,$(wildcard services/*/Dockerfile))
+# every services/<name>/Dockerfile becomes image wmg/<name>, plus wmg/deployer (deploy/deployer, P14);
+# override to build a subset: make images SERVICES=woo-mcp
+SERVICES    ?= $(patsubst services/%/Dockerfile,%,$(wildcard services/*/Dockerfile)) deployer
 IMAGE_TAG    = $(shell cat $(TAG_FILE) 2>/dev/null)
 # charts refuse to render without image tags; lint/kubeconform use a placeholder
 CHART_CHECK_SET := --set-string wooMcp.image.tag=check --set-string image.repository=check --set-string image.tag=check \
-                   --set-string gateway.image.tag=check --set-string dashboard.image.tag=check
+                   --set-string gateway.image.tag=check --set-string dashboard.image.tag=check \
+                   --set-string provisioning.deployerImage.tag=check --set-string provisioning.wooMcpImage.tag=check
 UPSTREAMS_NS := mcp-upstreams
 SERVER_CHART := charts/mcp-server
 PLATFORM_NS  := mcp-platform
@@ -37,19 +39,25 @@ ISSUER_SET   = --set-string 'ingress.annotations.cert-manager\.io/cluster-issuer
 STORE_ENV_SET :=
 UPSTREAM_ENV_SET :=
 PLATFORM_ENV_SET :=
+KUBECTL_ENV :=
 ifeq ($(ENV),prod)
 export KUBECONFIG := $(VPS_KUBECONFIG)
 IMAGE_PREFIX := ghcr.io/$(GH_OWNER)/wmg-
 # release.yml tags images with the short sha of the commit it built; override with IMAGE_TAG=<sha>
 IMAGE_TAG    = $(shell git rev-parse --short HEAD)
-KUBE_API_IP  = $(shell KUBECONFIG=$(VPS_KUBECONFIG) kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
-                 -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
+# macOS make 3.81: $(shell) does not see exported variables, so the kubeconfig is passed explicitly
+KUBECTL_ENV := KUBECONFIG=$(VPS_KUBECONFIG)
 STORE_ENV_SET = --set-string store.host=shop.$(BASE_DOMAIN) --set-string existingSecret=$(STORE)-store-credentials \
                 $(ISSUER_SET)
 UPSTREAM_ENV_SET = --set-string auth.existingSecret=$$name-mcp-auth
+# --set-json: --set would parse the {name} placeholder as a list
 PLATFORM_ENV_SET = --set-string hosts.dashboard=dashboard.$(BASE_DOMAIN) --set-string hosts.gateway=gateway.$(BASE_DOMAIN) \
-                   --set 'networkPolicy.kubeApiCIDRs={$(KUBE_API_IP)/32}' $(ISSUER_SET)
+                   --set-json 'provisioning.storeHostTemplate="{name}.shop.$(BASE_DOMAIN)"' $(ISSUER_SET)
 endif
+# API server address for the gateway + deployer NetworkPolicy egress, looked up on every install (k3d's moves when
+# Docker restarts)
+KUBE_API_IP  = $(shell $(KUBECTL_ENV) kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes \
+                 -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
 
 SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 gst=$(UPSTREAMS_NS)/gst-mcp-auth/token \
@@ -57,7 +65,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
         status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e verify-k8s images kubeconform upstreams upstreams-uninstall \
-        platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
+        e2e-stores platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -130,12 +138,17 @@ llm-models: ## Show which candidate Gemini models the key in .env can use (PLAN 
 llm-smoke: ## One function-calling round trip per candidate model; first pass wins (MODEL=... to test one)
 	@$(LLM_KEY_ENV) $(UV_RUN) python scripts/llm_check.py smoke $(if $(MODEL),--model $(MODEL))
 
-platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres (image tags from .image-tag)
+platform: platform-ns ## Install/upgrade gateway + dashboard + Postgres + store provisioning (image tags from .image-tag)
 	@test -n "$(IMAGE_TAG)" || { echo "No $(TAG_FILE) - run 'make images' first"; exit 1; }
+	@test -n "$(KUBE_API_IP)" || { echo "Could not look up the Kubernetes API address"; exit 1; }
 	helm upgrade --install platform $(PLATFORM_CHART) -n $(PLATFORM_NS) -f $(PLATFORM_CHART)/values-$(ENV).yaml \
 	  --set-string gateway.image.repository=$(IMAGE_PREFIX)gateway --set-string gateway.image.tag=$(IMAGE_TAG) \
 	  --set-string dashboard.image.repository=$(IMAGE_PREFIX)dashboard --set-string dashboard.image.tag=$(IMAGE_TAG) \
-	  $(PLATFORM_ENV_SET) --wait --timeout 5m
+	  --set-string provisioning.deployerImage.repository=$(IMAGE_PREFIX)deployer \
+	  --set-string provisioning.deployerImage.tag=$(IMAGE_TAG) \
+	  --set-string provisioning.wooMcpImage.repository=$(IMAGE_PREFIX)woo-mcp \
+	  --set-string provisioning.wooMcpImage.tag=$(IMAGE_TAG) \
+	  --set 'networkPolicy.kubeApiCIDRs={$(KUBE_API_IP)/32}' $(PLATFORM_ENV_SET) --wait --timeout 5m
 
 platform-uninstall: ## Uninstall the platform release (Postgres PVC and Secrets are kept)
 	-helm uninstall platform -n $(PLATFORM_NS)
@@ -188,7 +201,10 @@ test-integration: ## Integration tests (needs Docker: starts postgres:17.11-alpi
 	$(UV_RUN) pytest -m integration
 
 e2e: ## DoD acceptance suite + isolation checks against the running cluster (TESTING §4, §5; make up first)
-	$(UV_RUN) pytest tests/e2e -m e2e -v --durations=0
+	$(UV_RUN) pytest tests/e2e -m "e2e and not bonus" -v --durations=0
+
+e2e-stores: ## Bonus store provisioning B-01..B-07 against the running cluster (TESTING §6; ~15 min, creates paris/tokyo)
+	$(UV_RUN) pytest tests/e2e/test_stores.py -m bonus -v --durations=0
 
 # Deployments/StatefulSets: requests, limits, liveness, readiness. Jobs run to completion: requests + limits only.
 VERIFY_JQ := '[.items[] | select(.metadata.namespace | test("^(store-|mcp-)")) | .kind as $$k \
@@ -213,6 +229,7 @@ images: ## Build service images (tag dev-<sha>[-<ts> if dirty] -> .image-tag) an
 	 echo "$$tag" > $(TAG_FILE); echo "TAG=$$tag"; imgs=""; \
 	 for s in $(SERVICES); do \
 	   if [ "$$s" = dashboard ]; then docker build -t wmg/$$s:$$tag $(DASHBOARD) || exit 1; \
+	   elif [ "$$s" = deployer ]; then docker build -f deploy/deployer/Dockerfile -t wmg/$$s:$$tag . || exit 1; \
 	   else docker build -f services/$$s/Dockerfile -t wmg/$$s:$$tag . || exit 1; fi; \
 	   imgs="$$imgs wmg/$$s:$$tag"; \
 	 done; \
@@ -241,8 +258,8 @@ vps-ssh: ## VPS: SSH shell
 prod-secrets: ## VPS: create namespaces + Secrets once (scripts/prod-secrets.sh; values never printed)
 	KUBECONFIG=$(VPS_KUBECONFIG) scripts/prod-secrets.sh .env.prod
 
-prod-acme-netpol: ## VPS: let Traefik reach cert-manager HTTP-01 solver pods in the store and platform namespaces
-	@for n in $(STORE_NS) $(PLATFORM_NS); do KUBECONFIG=$(VPS_KUBECONFIG) kubectl apply -n $$n -f deploy/k3s/acme-solver-netpol.yaml; done
+prod-acme-netpol: ## VPS: let Traefik reach cert-manager HTTP-01 solver pods in mcp-platform (stores: woo-store chart)
+	KUBECONFIG=$(VPS_KUBECONFIG) kubectl apply -n $(PLATFORM_NS) -f deploy/k3s/acme-solver-netpol.yaml
 
 prod-up: ## VPS: secrets, upstreams, store, credentials, platform from GHCR images (IMAGE_TAG=<sha>, CERT_ISSUER=letsencrypt-staging to test)
 	$(MAKE) ENV=prod prod-secrets prod-acme-netpol upstreams store seed-credentials platform

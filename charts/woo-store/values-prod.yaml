@@ -12,6 +12,9 @@ ingress:
     enabled: true
     secretName: shop-tls
 
+networkPolicy:
+  acmeHttp01Solver: true
+
 # Created beforehand by scripts/prod-secrets.sh (`make prod-secrets`); the Makefile passes <store>-store-credentials.
 existingSecret: main-store-credentials
 
@@ -39,3 +42,15 @@ wordpress:
     limits:
       cpu: "2"
       memory: 1Gi
+
+# Quota for the bigger prod main store: limits sum to ~4.6 CPU / 3 GiB (incl. setup Job, helm test, ACME solver)
+# and two 10Gi volumes. Bonus stores go back to the default quota via values-bonus.yaml.
+guardrails:
+  quota:
+    requestsCpu: "2"
+    requestsMemory: 3Gi
+    limitsCpu: "8"
+    limitsMemory: 6Gi
+    pods: "10"
+    pvcs: "3"
+    requestsStorage: 24Gi

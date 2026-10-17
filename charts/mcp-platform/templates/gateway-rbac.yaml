@@ -1,4 +1,4 @@
-# Narrow rights for the gateway (DESIGN §8.6): only its own namespace; used from P14 (deployer Jobs).
+# Narrow rights for the gateway (DESIGN §8.6): only its own namespace (deployer Jobs + their input Secrets, P14).
 apiVersion: v1
 kind: ServiceAccount
 metadata:

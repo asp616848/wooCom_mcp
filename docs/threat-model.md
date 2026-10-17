@@ -98,6 +98,9 @@ for 72 hours, stored only as a hash.
 | Something in the cluster calls woo-mcp or the store's database directly | NetworkPolicies: woo-mcp accepts only gateway pods; MariaDB only WordPress and the setup Job; Postgres only the gateway (tested with probe pods, `make test-k8s`) |
 | A compromised upstream pod probes the cluster or the internet | gst and pincode have no egress at all |
 | A compromised gateway uses the Kubernetes API | namespaced Role only; `kubectl auth can-i` matrix tested |
+| The store deployer (bonus) is abused to reach the platform | RBAC: only namespaces + a RoleBinding to the store role, bound per store namespace, so it can't read `mcp-platform` Secrets; ValidatingAdmissionPolicy `wmg-deployer-scope` denies any write outside `store-<name>` (never `store-main`); tested with server dry-runs as the deployer |
+| One tenant store reaches another | per-store NetworkPolicies (woo-mcp → own WordPress only; MariaDB ← own WordPress only); `paris` → `tokyo` probes blocked in `make e2e-stores` |
+| A user exhausts the cluster with stores | 2 per user, 4 total (checked under a DB lock); ResourceQuota + LimitRange per store namespace; Job deadlines |
 | Privileged containers | PSA `restricted` on platform and upstream namespaces; `baseline` on the store (Apache) |
 | Secrets in Git | none: generated in-cluster or created from a git-ignored `.env`; `.gitignore` blocks env and key files |
 

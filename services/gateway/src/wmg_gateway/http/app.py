@@ -1,10 +1,11 @@
 """FastAPI app factory: lifespan, health, metrics, /api routers, the MCP mount, error handling (DESIGN §5.3).
 
 Lifespan order (§5.1): db pool → migrations + bootstrap → catalog → MCP session manager → LISTEN task →
-leader task (health loop) → serve → shutdown in reverse.
+leader task (health loop + store reconciler) → serve → shutdown in reverse.
 """
 
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,13 +22,15 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from wmg_common.errors import AppError, error_response
 from wmg_common.logging import get_logger
 from wmg_gateway.bootstrap import bootstrap
+from wmg_gateway.catalog.catalog import server_entry
 from wmg_gateway.db.migrate import migrate
 from wmg_gateway.db.pool import create_pool
 from wmg_gateway.events.bus import EventListener
-from wmg_gateway.http.api import audit, auth, chat, connect, invites, keys, servers, users
+from wmg_gateway.http.api import audit, auth, chat, connect, invites, keys, servers, stores, users
 from wmg_gateway.http.deps import csrf_check
 from wmg_gateway.leader import Leader
 from wmg_gateway.mcp.servers import build_full_server
+from wmg_gateway.provisioner.stores import StoreReconciler
 from wmg_gateway.request_context import RequestContextMiddleware
 from wmg_gateway.runtime import Runtime
 from wmg_gateway.settings import Settings
@@ -104,7 +107,23 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
             settings.health_interval_ms / 1000,
             settings.health_timeout_ms / 1000,
         )
-        await checker.run_forever()
+
+        async def probe_server(server_id: uuid.UUID) -> None:
+            async with rt.pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM mcp_servers WHERE id = $1", server_id)
+            if row is not None:
+                await checker.check(server_entry(row))
+
+        async def forget_server(server_id: uuid.UUID) -> None:
+            await rt.manager.forget(str(server_id))
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(checker.run_forever)
+            if rt.k8s is not None:
+                reconciler = StoreReconciler(
+                    rt.pool, rt.k8s, settings, rt.cipher, on_ready=probe_server, on_removed=forget_server
+                )
+                tg.start_soon(reconciler.run_forever)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -148,7 +167,7 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
     app.mount("/metrics", make_asgi_app())
 
     api = APIRouter(prefix="/api", dependencies=[Depends(csrf_check)])
-    for module in (auth, users, invites, keys, servers, audit, connect, chat):
+    for module in (auth, users, invites, keys, servers, audit, connect, chat, stores):
         api.include_router(module.router)
 
     # Without this, unknown /api paths would fall through to the MCP mount and get its plain-text 404.

@@ -112,6 +112,29 @@ spec:
                 secretKeyRef: { name: {{ .Values.gateway.llm.secretName }}, key: api-key, optional: true }
             - name: TOOL_SEARCH_THRESHOLD
               value: {{ .Values.gateway.toolSearchThreshold | int | quote }}
+            - name: K8S_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            {{- with .Values.provisioning }}
+            {{- if .enabled }}
+            # P14 store provisioning (DESIGN §13)
+            - name: DEPLOYER_IMAGE
+              value: {{ include "mcp-platform.image" .deployerImage | quote }}
+            - name: WOO_MCP_IMAGE
+              value: {{ include "mcp-platform.image" .wooMcpImage | quote }}
+            - name: STORE_HOST_TEMPLATE
+              value: {{ .storeHostTemplate | quote }}
+            - name: STORE_SCHEME
+              value: {{ .storeScheme | quote }}
+            - name: STORE_VALUES_ENV
+              value: {{ .storeValuesEnv | quote }}
+            - name: MAX_STORES_PER_USER
+              value: {{ .maxStoresPerUser | int | quote }}
+            - name: MAX_STORES_TOTAL
+              value: {{ .maxStoresTotal | int | quote }}
+            - name: PROVISION_TIMEOUT_S
+              value: {{ .provisionTimeoutS | int | quote }}
+            {{- end }}
+            {{- end }}
           lifecycle:
             # let Traefik drop the endpoint before uvicorn stops accepting connections
             preStop:

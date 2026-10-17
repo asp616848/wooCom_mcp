@@ -1,0 +1,78 @@
+{{- if .Values.provisioning.enabled }}
+{{- /*
+Deployer identity (DESIGN §8.6, D78 + P14 refinement). Cluster-wide it may only manage store namespaces and bind
+itself, per namespace, to wmg-store-deployer (RBAC `bind` limited to that one ClusterRole). It holds no namespaced
+rights anywhere else, so it cannot even read mcp-platform Secrets; the admission policy below confines every write
+it makes to store-<name> namespaces (never store-main).
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wmg-deployer
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wmg-deployer
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["wmg-store-deployer"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wmg-deployer
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wmg-deployer
+subjects:
+  - kind: ServiceAccount
+    name: wmg-deployer
+    namespace: {{ .Release.Namespace }}
+---
+# Everything a woo-store release needs inside its own namespace (bound there by the deployer, never cluster-wide).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wmg-store-deployer
+  labels:
+    {{- include "mcp-platform.labels" (list . "deployer") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "services", "persistentvolumeclaims", "pods", "serviceaccounts",
+                "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "controllerrevisions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+{{- end }}

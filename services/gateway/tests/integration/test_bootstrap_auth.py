@@ -51,7 +51,7 @@ async def client(settings: Settings) -> AsyncIterator[httpx2.AsyncClient]:
 async def test_migrations_idempotent_and_bootstrap_once(settings: Settings) -> None:
     pool = await create_pool(settings.database_url.get_secret_value(), 1, 2)
     try:
-        assert await migrate(pool) == ["001_init"]
+        assert await migrate(pool) == ["001_init", "002_stores"]
         assert await migrate(pool) == []
     finally:
         await pool.close()

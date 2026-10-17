@@ -47,10 +47,16 @@ plugins = ["pydantic.mypy"]
 module = ["asyncpg", "asyncpg.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# the kubernetes client ships no type information; provisioner/k8s.py wraps it behind the typed JobApi protocol
+module = ["kubernetes", "kubernetes.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
 testpaths = ["packages", "services"]
 markers = [
     "integration: needs Docker (Postgres) and fixture servers; run with make test-integration",
     "e2e: runs against the live cluster (make up first); run with make test-k8s / make e2e",
+    "bonus: P14 store provisioning against the live cluster (creates stores; ~15 min); run with make e2e-stores",
 ]

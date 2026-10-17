@@ -232,3 +232,25 @@ export const KEY_PLACEHOLDER = '<YOUR_API_KEY>';
 export const connectApi = {
   info: () => api<ConnectInfo>('/connect-info'),
 };
+
+// ---- stores (bonus, DESIGN §13.1) ----
+export type StoreStatus = 'provisioning' | 'ready' | 'failed' | 'deleting';
+
+export interface Store {
+  name: string;
+  status: StoreStatus;
+  statusReason: string | null;
+  url: string;
+  attempt: number;
+  owner: string;
+  toolsPrefix: string;
+  createdAt: string;
+  readyAt: string | null;
+}
+
+export const storesApi = {
+  list: () => api<{ stores: Store[] }>('/stores'),
+  create: (name: string) => api<{ store: Store }>('/stores', 'POST', { name }),
+  retry: (name: string) => api<{ store: Store }>(`/stores/${encodeURIComponent(name)}/retry`, 'POST'),
+  remove: (name: string) => api<{ store: Store }>(`/stores/${encodeURIComponent(name)}`, 'DELETE'),
+};
