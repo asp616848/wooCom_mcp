@@ -123,10 +123,14 @@ seed-credentials: platform-ns ## Copy upstream credentials into mcp-platform Sec
 	      --dry-run=client -o yaml | kubectl apply -f - >/dev/null && echo "seeded $$slug-upstream-credential"; \
 	done
 
-secrets-llm: platform-ns ## Create Secret platform-llm from GEMINI_API_KEY in .env (skips with a warning if missing)
+secrets-llm: platform-ns ## Create Secret platform-llm from GEMINI_API_KEY (+ optional GEMINI_API_KEY_2 fallback, D92) in .env
 	@key=$$(grep -E '^GEMINI_API_KEY=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r'); \
 	if [ -z "$$key" ]; then echo "WARNING: GEMINI_API_KEY not set in .env - chat will be unavailable"; exit 0; fi; \
-	printf '%s' "$$key" | kubectl create secret generic platform-llm -n $(PLATFORM_NS) --from-file=api-key=/dev/stdin \
+	key2=$$(grep -E '^GEMINI_API_KEY_2=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r'); \
+	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; umask 077; \
+	printf '%s' "$$key" > "$$dir/api-key"; \
+	if [ -n "$$key2" ]; then printf '%s' "$$key2" > "$$dir/api-key-fallback"; fi; \
+	kubectl create secret generic platform-llm -n $(PLATFORM_NS) --from-file="$$dir" \
 	  --dry-run=client -o yaml | kubectl apply -f - >/dev/null && echo "platform-llm Secret updated"
 
 # GEMINI_API_KEY from .env goes into the child's environment only; recipes are silent so it is never echoed

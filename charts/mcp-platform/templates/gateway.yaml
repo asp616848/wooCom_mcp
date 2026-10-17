@@ -110,6 +110,9 @@ spec:
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef: { name: {{ .Values.gateway.llm.secretName }}, key: api-key, optional: true }
+            - name: LLM_API_KEY_FALLBACK  # D92: one retry on this key when the primary fails
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.gateway.llm.secretName }}, key: api-key-fallback, optional: true }
             - name: TOOL_SEARCH_THRESHOLD
               value: {{ .Values.gateway.toolSearchThreshold | int | quote }}
             - name: K8S_NAMESPACE

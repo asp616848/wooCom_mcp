@@ -9,13 +9,14 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import httpx2
 import mcp_types as types
 from mcp import Client, MCPError
 from mcp.client.streamable_http import streamable_http_client
-from openai import APIError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, RateLimitError
+from openai.types.chat import ChatCompletion
 
 from wmg_common.logging import get_logger
 from wmg_gateway.security import jwt
@@ -174,9 +175,54 @@ def system_prompt(now: datetime) -> str:
 # ---------------------------------------------------------------------------------------------- loop
 
 
+def switchable(exc: APIError) -> bool:
+    """Errors the fallback key can fix (D92): quota, provider outage, network, a bad or revoked key.
+
+    Gemini answers an invalid key with 400 INVALID_ARGUMENT, so a 400 counts only when it names the API key;
+    other 4xx (bad request, unknown model) would fail on any key.
+    """
+    if isinstance(exc, APIConnectionError):  # includes APITimeoutError
+        return True
+    if not isinstance(exc, APIStatusError):
+        return False
+    status = exc.status_code
+    if status in (401, 403, 429) or status >= 500:
+        return True
+    return status == 400 and "api key" in str(exc.message).lower()
+
+
+class LlmKeys:
+    """The LLM clients in key order (D92). A call that fails on the active key with a `switchable` error is
+    retried once per remaining key; the key that worked stays active for the rest of the turn."""
+
+    def __init__(self, *clients: AsyncOpenAI) -> None:
+        self.clients = list(clients)
+        self.active = 0
+
+    async def create(self, **kwargs: Any) -> ChatCompletion:
+        while True:
+            try:
+                response = await self.clients[self.active].chat.completions.create(**kwargs)
+                return cast(ChatCompletion, response)
+            except APIError as exc:
+                if self.active + 1 >= len(self.clients) or not switchable(exc):
+                    raise
+                log.warning(
+                    "llm key failed, switching to the fallback key",
+                    error=type(exc).__name__,
+                    status=getattr(exc, "status_code", None),
+                    key_index=self.active,
+                )
+                self.active += 1
+
+    async def close(self) -> None:
+        for client in self.clients:
+            await client.close()
+
+
 async def run_turn(
     mcp: ToolSession,
-    llm: AsyncOpenAI,
+    llm: LlmKeys,
     model: str,
     history: list[dict[str, str]],
     emit: Emit,
@@ -196,9 +242,9 @@ async def run_turn(
         while answer is None and llm_calls < MAX_LLM_CALLS:
             llm_calls += 1
             extra: dict[str, Any] = {"tools": declared} if declared else {}
-            response = await llm.chat.completions.create(
+            response = await llm.create(
                 model=model,
-                messages=messages,  # type: ignore[arg-type]
+                messages=messages,
                 temperature=0.1,
                 **extra,
             )
@@ -271,11 +317,12 @@ def _short(text: str, limit: int = 200) -> str:
 
 
 async def converse(
-    settings: Settings, api_key: str, user_id: str, history: list[dict[str, str]], emit: Emit
+    settings: Settings, api_keys: list[str], user_id: str, history: list[dict[str, str]], emit: Emit
 ) -> None:
     """Open the loopback MCP session as the user and run one turn; connection failures become `error`."""
     token = jwt.mint(user_id, settings.jwt_secret.get_secret_value())
-    llm = AsyncOpenAI(base_url=settings.llm_base_url, api_key=api_key, timeout=60.0, max_retries=0)
+    base_url = settings.llm_base_url
+    llm = LlmKeys(*(AsyncOpenAI(base_url=base_url, api_key=k, timeout=60.0, max_retries=0) for k in api_keys))
     url = f"http://127.0.0.1:{settings.port}/mcp"
     headers = {"Authorization": f"Bearer {token}"}
     finished = False

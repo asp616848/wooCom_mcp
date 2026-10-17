@@ -96,12 +96,12 @@ class SseResponse(Response):
 @router.post("/chat")
 async def chat(body: ChatRequest, user: CurrentUser, request: Request) -> Response:
     rt: Runtime = request.app.state.runtime
-    api_key = rt.settings.llm_key()
-    if api_key is None:
+    api_keys = rt.settings.llm_keys()
+    if not api_keys:
         raise AppError(503, "LLM_NOT_CONFIGURED", NOT_CONFIGURED)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
 
     async def produce(emit: agent.Emit) -> None:
-        await agent.converse(rt.settings, api_key, str(user.id), history, emit)
+        await agent.converse(rt.settings, api_keys, str(user.id), history, emit)
 
     return SseResponse(produce)
