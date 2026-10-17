@@ -26,7 +26,10 @@ FORBIDDEN = -32010
 RATE_LIMITED = -32011
 
 TOOL_CALLS = Counter("wmg_tool_calls_total", "tools/call requests", ["server", "outcome"])
-TOOL_CALL_SECONDS = Histogram("wmg_tool_call_duration_seconds", "tools/call duration", ["server"])
+BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 60)  # DESIGN §16
+TOOL_CALL_SECONDS = Histogram(
+    "wmg_tool_call_duration_seconds", "tools/call duration", ["server"], buckets=BUCKETS
+)
 
 # Failures where the upstream never saw the request: safe to retry once for read-only/idempotent tools (D39).
 RETRYABLE = frozenset({"CONNECTION_REFUSED"})

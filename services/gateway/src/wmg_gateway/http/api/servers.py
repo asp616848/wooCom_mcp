@@ -146,6 +146,7 @@ class AdminServerOut(ServerOut):
     auth_header_name: str | None
     has_credential: bool
     timeout_ms: int
+    last_ok_at: datetime | None
     last_error_code: str | None
     last_error: str | None
     created_at: datetime
@@ -218,6 +219,7 @@ def _out(row: Any, admin: bool) -> ServerOut:
         auth_header_name=row["auth_header_name"],
         has_credential=row["credential_enc"] is not None,
         timeout_ms=row["timeout_ms"],
+        last_ok_at=row["last_ok_at"],
         last_error_code=row["last_error_code"],
         last_error=row["last_error"],
         created_at=row["created_at"],

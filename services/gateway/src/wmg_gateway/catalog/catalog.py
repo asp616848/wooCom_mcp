@@ -12,6 +12,7 @@ from functools import cached_property
 from typing import Any
 
 import mcp_types as types
+from prometheus_client import Gauge
 
 from wmg_gateway.catalog.naming import exposed_description, exposed_title
 
@@ -170,6 +171,19 @@ async def load(conn: Any) -> Catalog:
     return Catalog(servers=servers, tools_by_exposed=by_exposed, tools_by_server=by_server)
 
 
+UPSTREAM_UP = Gauge("wmg_upstream_up", "1 if the upstream is enabled and connected", ["server"])
+UPSTREAM_TOOLS = Gauge("wmg_upstream_tools", "Tools the upstream exposes", ["server"])
+
+
+def export_metrics(catalog: Catalog) -> None:
+    """Gauges follow the snapshot on every replica (SO-8); deleted servers drop out of the scrape."""
+    UPSTREAM_UP.clear()
+    UPSTREAM_TOOLS.clear()
+    for server in catalog.servers.values():
+        UPSTREAM_UP.labels(server.slug).set(1 if server.enabled and server.status == "connected" else 0)
+        UPSTREAM_TOOLS.labels(server.slug).set(len(catalog.tools_by_server.get(server.id, [])))
+
+
 class CatalogHolder:
     def __init__(self) -> None:
         self.current = Catalog()
@@ -180,6 +194,7 @@ class CatalogHolder:
         async with pool.acquire() as conn:
             catalog = await load(conn)
         self.current = catalog
+        export_metrics(catalog)
         fingerprint = catalog.fingerprint()
         changed = fingerprint != self._fingerprint
         self._fingerprint = fingerprint

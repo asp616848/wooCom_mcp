@@ -65,6 +65,7 @@ export function ServerDetailPage() {
                 {server.authType !== 'none' && (server.hasCredential ? ' · •••• set' : ' · not set')}
               </Info>
               <Info label="Timeout">{server.timeoutMs} ms</Info>
+              <Info label="Last OK">{formatTime(server.lastOkAt)}</Info>
               {server.lastError && (
                 <Info label="Last error" wide>
                   <span className="text-red-700">
