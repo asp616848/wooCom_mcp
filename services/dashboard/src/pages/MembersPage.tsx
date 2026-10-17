@@ -259,7 +259,7 @@ function UserKeysDialog({ user, onClose }: { user: User; onClose: () => void }) 
         <div className="space-y-4">
           {keys.isPending && <Loading />}
           {keys.isError && <ErrorState error={keys.error} />}
-          {keys.data && <KeysTable keys={keys.data.keys} />}
+          {keys.data && <KeysTable list={keys.data} />}
           <Button disabled={issue.isPending || user.status !== 'active'} onClick={() => issue.mutate()}>
             <KeyRound className="size-4" /> Issue a key for {user.name}
           </Button>

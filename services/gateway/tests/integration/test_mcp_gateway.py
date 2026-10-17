@@ -3,7 +3,9 @@
 Each test gets a fresh database and its own gateway(s) on real HTTP; fixture upstreams are shared per session.
 """
 
+import re
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -607,3 +609,111 @@ async def mcp_at(gw: Any, key: str, path: str) -> AsyncIterator[Client]:
         Client(streamable_http_client(gw.url + path, http_client=http), cache=None) as client,  # type: ignore[arg-type]
     ):
         yield client
+
+
+async def _fresh_minute(need_s: float = 20.0) -> None:
+    """Rate windows are calendar minutes: start a burst early enough in one that it can't straddle two."""
+    into = time.time() % 60
+    if into > 60 - need_s:
+        await anyio.sleep(60 - into + 0.2)
+
+
+async def _rate_limited(gw: Any, key: str, path: str = "/mcp", tool: str = "fx-modern__echo") -> str:
+    async with mcp_at(gw, key, path) as c:
+        with pytest.raises(MCPError) as err:
+            if path == "/mcp":
+                await c.call_tool(tool, {"text": "x"})
+            else:
+                await c.call_tool("call_tool", {"name": tool, "arguments": {"text": "x"}})
+    assert err.value.error.code == -32011, err.value.error
+    return err.value.error.message
+
+
+async def test_SO7_02_rate_limit_shared_across_replicas(
+    gateway_factory: Any, upstreams: Any, database_url: str
+) -> None:
+    """SO7-02 (D95): 120 tool calls a minute per credential, counted across replicas; the 121st → -32011 and
+    a `rate_limited` audit row; other keys are unaffected. A per-key override applies on the next request,
+    counts search mode's call_tool too (not search_tools), and null restores the default."""
+    gw, other = gateway_factory(rate_limit_per_min=120), gateway_factory(rate_limit_per_min=120)
+    async with session(gw) as admin:
+        await register(admin, "fx-modern", upstreams.modern.url + "/mcp")
+        burst, spare, small = (
+            await new_key(admin, "burst"),
+            await new_key(admin, "spare"),
+            await new_key(admin, "s"),
+        )
+        await eventually(lambda: has_tools(other, burst, "fx-modern__echo"))
+        await _fresh_minute()
+        async with mcp(gw, burst) as a, mcp(other, burst) as b:
+            for i in range(120):
+                result = await (a if i % 2 else b).call_tool("fx-modern__echo", {"text": str(i)})
+                assert not result.is_error, (i, result.content)
+        message = await _rate_limited(other, burst)
+        assert re.fullmatch(r"Rate limit exceeded; retry in \d+s", message), message
+        async with mcp(gw, spare) as c:  # per credential, not per user
+            assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+
+        keys = (await admin.get("/api/keys")).json()
+        assert keys["defaultRateLimitPerMin"] == 120
+        small_row = next(k for k in keys["keys"] if k["name"] == "s")
+        assert small_row["rateLimitPerMin"] is None
+        r = await admin.patch(f"/api/keys/{small_row['id']}", json={"rateLimitPerMin": 2})
+        assert r.status_code == 200 and r.json()["key"]["rateLimitPerMin"] == 2, r.text
+        await _fresh_minute(10)
+        async with mcp_at(gw, small, "/mcp/search") as c:
+            for _ in range(3):  # searching is free
+                await c.call_tool("search_tools", {"query": "echo"})
+            result = await c.call_tool("call_tool", {"name": "fx-modern__echo", "arguments": {"text": "x"}})
+            assert not result.is_error
+        async with mcp(other, small) as c:
+            assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+        await _rate_limited(gw, small, "/mcp/search")
+        r = await admin.patch(f"/api/keys/{small_row['id']}", json={"rateLimitPerMin": None})
+        assert r.status_code == 200 and r.json()["key"]["rateLimitPerMin"] is None
+        async with mcp(gw, small) as c:
+            assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error
+
+        spare_id = next(k["id"] for k in keys["keys"] if k["name"] == "spare")
+        for body, status in (({"rateLimitPerMin": 0}, 422), ({"rateLimitPerMin": 100_001}, 422), ({}, 422)):
+            assert (await admin.patch(f"/api/keys/{spare_id}", json=body)).status_code == status, body
+        missing = await admin.patch(f"/api/keys/{uuid.uuid4()}", json={"rateLimitPerMin": 5})
+        assert missing.status_code == 404
+        assert (await admin.delete(f"/api/keys/{spare_id}")).status_code == 204
+        revoked = await admin.patch(f"/api/keys/{spare_id}", json={"rateLimitPerMin": 5})
+        assert revoked.status_code == 409 and revoked.json()["error"]["message"] == "Key is revoked"
+        invite = await admin.post("/api/invites", json={"email": "ritika@example.com", "role": "member"})
+        token = invite.json()["inviteUrl"].rsplit("/", 1)[1]
+        async with httpx2.AsyncClient(base_url=gw.url, headers=CSRF) as anon:
+            body = {"name": "Ritika", "password": "ritika-password-1"}
+            assert (await anon.post(f"/api/invites/{token}/accept", json=body)).status_code == 200
+        async with session(gw, {"email": "ritika@example.com", "password": "ritika-password-1"}) as member:
+            await new_key(member, "mine")
+            mine = next(k for k in (await member.get("/api/keys")).json()["keys"] if k["name"] == "mine")
+            assert (
+                await member.patch(f"/api/keys/{mine['id']}", json={"rateLimitPerMin": 500})
+            ).status_code == 403
+
+    conn = await db(database_url)
+    try:
+        rows = await conn.fetch("SELECT outcome, client_mode FROM audit_log WHERE outcome = 'rate_limited'")
+    finally:
+        await conn.close()
+    assert sorted((r["outcome"], r["client_mode"]) for r in rows) == [
+        ("rate_limited", "full"),
+        ("rate_limited", "search"),
+    ]
+
+
+async def test_rate_limit_off_by_default_in_settings(gateway_factory: Any, upstreams: Any) -> None:
+    """RATE_LIMIT_PER_MIN=0 turns the limiter off, per-key overrides included (D95)."""
+    gw = gateway_factory()  # Settings default 0; the chart sets 120
+    async with session(gw) as admin:
+        await register(admin, "fx-modern", upstreams.modern.url + "/mcp")
+        key = await new_key(admin, "k")
+        key_id = next(k["id"] for k in (await admin.get("/api/keys")).json()["keys"] if k["name"] == "k")
+        assert (await admin.patch(f"/api/keys/{key_id}", json={"rateLimitPerMin": 1})).status_code == 200
+        await eventually(lambda: has_tools(gw, key, "fx-modern__echo"))
+    async with mcp(gw, key) as c:
+        for _ in range(3):
+            assert not (await c.call_tool("fx-modern__echo", {"text": "x"})).is_error

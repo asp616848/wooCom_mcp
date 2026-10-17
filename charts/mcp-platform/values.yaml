@@ -94,6 +94,9 @@ gateway:
     model: gemini-3-flash-preview
     secretName: platform-llm
   toolSearchThreshold: 40
+  # SO-7 (D95): tool calls per minute per credential, shared by all replicas; 0 = off. Admins can give a key
+  # its own limit on the Keys page.
+  rateLimitPerMin: 120
   # PodDisruptionBudget (minAvailable 1); enable when replicas > 1 (prod).
   pdb:
     enabled: false

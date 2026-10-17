@@ -37,7 +37,8 @@ class WmgTokenVerifier:
             return None
         async with self._rt.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT k.id, k.secret_hash, k.revoked_at, u.id AS user_id, u.email, u.role, u.status "
+                "SELECT k.id, k.secret_hash, k.revoked_at, k.rate_limit_per_min, "
+                "u.id AS user_id, u.email, u.role, u.status "
                 "FROM api_keys k JOIN users u ON u.id = k.user_id WHERE k.prefix = $1",
                 prefix,
             )
@@ -91,6 +92,7 @@ class WmgTokenVerifier:
                 "role": row["role"],
                 "credential_type": credential_type,
                 "credential_id": credential_id,
+                "rate_limit": row.get("rate_limit_per_min"),
             },
         )
 

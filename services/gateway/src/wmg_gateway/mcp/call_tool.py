@@ -1,4 +1,4 @@
-"""`tools/call` (DESIGN §5.7, D37-D39): resolve → authorize → route to the upstream → cap → audit.
+"""`tools/call` (DESIGN §5.7, D37-D39): resolve → authorize → rate limit → route upstream → cap → audit.
 
 Protocol problems (unknown tool, forbidden) are JSON-RPC errors. Upstream problems (unreachable, timeout,
 error, oversize) are tool results with `isError` and a `[gateway] …` message, so the model can read them and
@@ -17,6 +17,7 @@ from prometheus_client import Counter, Histogram
 from wmg_gateway.audit.audit import AuditRecord, Outcome, summarize_args
 from wmg_gateway.catalog.catalog import ToolEntry
 from wmg_gateway.mcp.caller import Caller, caller_from, client_name
+from wmg_gateway.ratelimit import ratelimit
 from wmg_gateway.request_context import request_meta
 from wmg_gateway.runtime import Runtime
 from wmg_gateway.upstream.health import mark_unreachable
@@ -101,7 +102,11 @@ async def call_exposed(
     if entry.admin_only and cc.caller.role != "admin":
         await cc.audit("denied", entry, "Admin-only tool")
         raise MCPError(FORBIDDEN, f"Forbidden: {name} requires admin role")
-    # Step 5 (rate limit, -32011) is added with SO-7 in P16.
+    retry = await ratelimit.retry_after(rt.pool, cc.caller, rt.settings.rate_limit_per_min)
+    if retry is not None:
+        message = f"Rate limit exceeded; retry in {retry}s"
+        await cc.audit("rate_limited", entry, message)
+        raise MCPError(RATE_LIMITED, message)
     if server.status != "connected":
         message = (
             f"[gateway] Server '{server.slug}' is unreachable: {server.last_error or 'not connected yet'}"

@@ -19,6 +19,7 @@ class Caller:
     role: str
     credential_type: CredentialType
     credential_id: str
+    rate_limit: int | None = None  # the API key's own limit (D95); None = the gateway default
 
 
 def _token(ctx: Any) -> AccessToken | None:
@@ -40,6 +41,7 @@ def caller_from(ctx: Any) -> Caller:
         role=str(claims["role"]),
         credential_type=claims["credential_type"],
         credential_id=str(claims["credential_id"]),
+        rate_limit=claims.get("rate_limit"),
     )
 
 
