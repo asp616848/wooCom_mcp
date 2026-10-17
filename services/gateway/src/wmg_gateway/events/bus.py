@@ -46,6 +46,10 @@ class EventListener:
                         send.send_nowait(payload)
                     except anyio.WouldBlock:
                         pass  # a reload is already pending; it will see the latest state
+                    except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                        # a NOTIFY landing while this connection is being closed (shutdown or reconnect);
+                        # a reconnect reloads anyway, so the event is not lost
+                        pass
 
                 await conn.add_listener(CHANNEL, on_notify)
                 if started:
