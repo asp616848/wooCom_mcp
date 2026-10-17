@@ -76,6 +76,7 @@ class World:
     rohan_id: str = ""
     key: str = ""
     started: float = 0.0
+    started_at: str = ""  # RFC 3339 UTC, compared with pod creationTimestamps
     ready: bool = False
     llm: bool = False
     probe_pods: list[tuple[str, str]] = field(default_factory=list)
@@ -125,12 +126,14 @@ def mcp_tools(key: str) -> list[str]:
     return result
 
 
-def deployer_pods(store: str) -> list[str]:
+def deployer_pods(store: str, since: str) -> list[str]:
+    """This run's provisioning pods for `store` (earlier runs' pods stay for the Job TTL of 1 h)."""
     out = kubectl(
-        "get", "pods", "-n", "mcp-platform", "-l", f"app.kubernetes.io/name=deployer,wmg.dev/store={store}",
-        "-o", "jsonpath={.items[*].metadata.name}",
+        "get", "pods", "-n", "mcp-platform", "-o", "json",
+        "-l", f"app.kubernetes.io/name=deployer,wmg.dev/action=provision,wmg.dev/store={store}",
     ).stdout  # fmt: skip
-    return out.split()
+    pods = [p for p in json.loads(out)["items"] if p["metadata"]["creationTimestamp"] >= since]
+    return [p["metadata"]["name"] for p in sorted(pods, key=lambda p: p["metadata"]["creationTimestamp"])]
 
 
 def store_order(name: str) -> int:
@@ -263,6 +266,7 @@ def test_01_B01_create_two_stores_concurrently(world: World) -> None:
             results[name] = client.post("/api/stores", json={"name": name})
 
     world.started = time.monotonic()
+    world.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 1))
     threads = [threading.Thread(target=create, args=(name,)) for name in STORES]
     for t in threads:
         t.start()
@@ -290,14 +294,16 @@ def test_03_B04_kill_deployer_pod_mid_helm(world: World) -> None:
     need(world.started, "the stores")
 
     def helm_running() -> bool:
-        pods = deployer_pods("paris")
-        return bool(pods) and "5/6 helm" in kubectl("logs", "-n", "mcp-platform", pods[0], check=False).stdout
+        pods = deployer_pods("paris", world.started_at)
+        return (
+            bool(pods) and "5/6 helm" in kubectl("logs", "-n", "mcp-platform", pods[-1], check=False).stdout
+        )
 
     eventually(helm_running, 180)
     time.sleep(20)  # Helm is now creating the release's resources
-    (victim,) = deployer_pods("paris")
+    (victim,) = deployer_pods("paris", world.started_at)
     kubectl("delete", "pod", victim, "-n", "mcp-platform", "--wait=false")
-    eventually(lambda: any(p != victim for p in deployer_pods("paris")), 120)
+    eventually(lambda: any(p != victim for p in deployer_pods("paris", world.started_at)), 120)
 
 
 def test_04_B03_kill_gateway_pods_during_provisioning(world: World) -> None:
@@ -441,9 +447,13 @@ def test_10_B08_BR_AT_chat_compares_todays_orders(world: World) -> None:
         pytest.skip("!!! LLM Secret platform-llm missing: BR-AT chat NOT RUN (make secrets-llm) !!!")
     orders = {name: store_order(name) for name in STORES}
     events = chat(rohan, "Compare today's orders across paris and tokyo")
+    errors = [d.get("message", "") for k, d in events if k == "error"]
+    if any("rate limit" in e for e in errors):  # an external quota, not a product failure: say so loudly
+        pytest.skip(f"!!! LLM provider rate-limited: BR-AT chat NOT VERIFIED ({errors[0]}) !!!")
     calls = [data["name"] for kind, data in events if kind == "tool_call"]
     assert "woo-paris__list_orders" in calls and "woo-tokyo__list_orders" in calls, calls
-    answer = next(d["text"] for k, d in events if k == "answer")
+    answer = next((d["text"] for k, d in events if k == "answer"), None)
+    assert answer is not None, f"no answer event: {[(k, d) for k, d in events if k != 'tool_result']}"
     for name, order_id in orders.items():
         assert name in answer.lower() and str(order_id) in answer, (name, order_id, answer)
 
