@@ -19,6 +19,7 @@ from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, Ra
 from openai.types.chat import ChatCompletion
 
 from wmg_common.logging import get_logger
+from wmg_gateway.mcp.search import SEARCH_PATH
 from wmg_gateway.security import jwt
 from wmg_gateway.settings import Settings
 
@@ -168,8 +169,15 @@ def tool_content(result: types.CallToolResult) -> str:
     return body[:TOOL_CONTENT_LIMIT]
 
 
-def system_prompt(now: datetime) -> str:
-    return SYSTEM_PROMPT.format(now_iso=now.astimezone(UTC).isoformat(timespec="seconds"))
+SEARCH_MODE_NOTE = (
+    "\nSearch mode: there are too many tools to list. Call search_tools to find the right tool, then run it "
+    "with call_tool using the exact name and the arguments its schema needs."
+)
+
+
+def system_prompt(now: datetime, search: bool = False) -> str:
+    text = SYSTEM_PROMPT.format(now_iso=now.astimezone(UTC).isoformat(timespec="seconds"))
+    return text + SEARCH_MODE_NOTE if search else text
 
 
 # ---------------------------------------------------------------------------------------------- loop
@@ -227,15 +235,18 @@ async def run_turn(
     history: list[dict[str, str]],
     emit: Emit,
     now: datetime | None = None,
+    search: bool = False,
 ) -> None:
-    """One user turn: LLM ↔ tools until an answer or a limit. Emits events; always ends with `done`."""
+    """One user turn: LLM ↔ tools until an answer or a limit. Emits events; always ends with `done`.
+
+    `search`: the session is on `/mcp/search` (SO-4), so the tools are the three meta-tools.
+    """
     llm_calls = tool_calls = 0
     try:
         tools = (await mcp.list_tools()).tools
-        # Over TOOL_SEARCH_THRESHOLD tools switches to /mcp/search with SO-4 (P15); until then all are sent.
         declared = llm_tools(tools)
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt(now or datetime.now(UTC))},
+            {"role": "system", "content": system_prompt(now or datetime.now(UTC), search)},
             *history,
         ]
         answer: str | None = None
@@ -317,13 +328,21 @@ def _short(text: str, limit: int = 200) -> str:
 
 
 async def converse(
-    settings: Settings, api_keys: list[str], user_id: str, history: list[dict[str, str]], emit: Emit
+    settings: Settings,
+    api_keys: list[str],
+    user_id: str,
+    history: list[dict[str, str]],
+    emit: Emit,
+    search: bool = False,
 ) -> None:
-    """Open the loopback MCP session as the user and run one turn; connection failures become `error`."""
+    """Open the loopback MCP session as the user and run one turn; connection failures become `error`.
+
+    `search` (SO-4): the user can see more than TOOL_SEARCH_THRESHOLD tools, so use `/mcp/search`.
+    """
     token = jwt.mint(user_id, settings.jwt_secret.get_secret_value())
     base_url = settings.llm_base_url
     llm = LlmKeys(*(AsyncOpenAI(base_url=base_url, api_key=k, timeout=60.0, max_retries=0) for k in api_keys))
-    url = f"http://127.0.0.1:{settings.port}/mcp"
+    url = f"http://127.0.0.1:{settings.port}{SEARCH_PATH if search else '/mcp'}"
     headers = {"Authorization": f"Bearer {token}"}
     finished = False
 
@@ -342,7 +361,7 @@ async def converse(
                 client_info=CLIENT_INFO,
             ) as mcp,
         ):
-            await run_turn(mcp, llm, settings.llm_model, history, tracked)
+            await run_turn(mcp, llm, settings.llm_model, history, tracked, search=search)
     except Exception as exc:  # transport failures arrive as ExceptionGroups from the MCP client
         log.error("chat session failed", error=type(exc).__name__, exc_info=exc)
         if not finished:

@@ -100,8 +100,10 @@ async def chat(body: ChatRequest, user: CurrentUser, request: Request) -> Respon
     if not api_keys:
         raise AppError(503, "LLM_NOT_CONFIGURED", NOT_CONFIGURED)
     history = [{"role": m.role, "content": m.content} for m in body.messages]
+    # SO-4: past the threshold the agent gets the 3 search meta-tools instead of every tool
+    search = len(rt.catalog.current.visible_tools(user.role)) > rt.settings.tool_search_threshold
 
     async def produce(emit: agent.Emit) -> None:
-        await agent.converse(rt.settings, api_keys, str(user.id), history, emit)
+        await agent.converse(rt.settings, api_keys, str(user.id), history, emit, search=search)
 
     return SseResponse(produce)

@@ -558,3 +558,52 @@ async def test_SO8_01_metrics_and_insights_match_the_audit(
         assert failure["serverSlug"] == "fx-modern" and failure["outcome"] == "tool_error"
         assert failure["count"] == 1 and failure["lastSeen"].endswith("Z")
         assert (await admin.get("/api/insights", params={"window": "2h"})).status_code == 422
+
+
+ORDERS = "fx-many__list_orders"
+
+
+async def test_SO4_01_search_mode(gateway_factory: Any, many_tools: Any, database_url: str) -> None:
+    gw = gateway_factory()
+    async with session(gw) as admin:
+        server = await register(admin, "fx-many", many_tools.url + "/mcp")
+        await eventually(lambda: _tool_count(admin, server["id"], 60))
+        key = await new_key(admin)
+    async with mcp_at(gw, key, "/mcp/search") as c:
+        listed = sorted(t.name for t in (await c.list_tools()).tools)
+        assert listed == ["call_tool", "list_servers", "search_tools"]
+        found = await c.call_tool("search_tools", {"query": "orders today", "limit": 3})
+        tools = found.structured_content["tools"]  # type: ignore[index]
+        assert tools[0]["name"] == ORDERS and "period" in tools[0]["inputSchema"]["properties"]
+        result = await c.call_tool("call_tool", {"name": ORDERS, "arguments": {"period": "today"}})
+        assert not result.is_error and "2 orders today" in str(result.content[0])
+        servers = await c.call_tool("list_servers", {})
+        expected = {"servers": [{"slug": "fx-many", "name": "FX-MANY", "toolCount": 60}]}
+        assert servers.structured_content == expected
+        with pytest.raises(MCPError) as err:
+            await c.call_tool("call_tool", {"name": "fx-many__nope"})
+        assert err.value.error.code == -32602
+        with pytest.raises(MCPError):
+            await c.call_tool("search_tools", {"query": ""})
+    conn = await db(database_url)
+    try:
+        row = await conn.fetchrow(
+            "SELECT * FROM audit_log WHERE exposed_name = 'fx-many__list_orders' AND outcome = 'success'"
+        )
+    finally:
+        await conn.close()
+    # audited as the real tool, flagged as search mode
+    assert row is not None and row["tool_name"] == "list_orders" and row["client_mode"] == "search"
+
+
+async def _tool_count(http: httpx2.AsyncClient, server_id: str, n: int) -> bool:
+    return len((await http.get(f"/api/servers/{server_id}/tools")).json()["tools"]) == n
+
+
+@asynccontextmanager
+async def mcp_at(gw: Any, key: str, path: str) -> AsyncIterator[Client]:
+    async with (
+        httpx2.AsyncClient(headers={"Authorization": f"Bearer {key}"}, timeout=30) as http,
+        Client(streamable_http_client(gw.url + path, http_client=http), cache=None) as client,  # type: ignore[arg-type]
+    ):
+        yield client
