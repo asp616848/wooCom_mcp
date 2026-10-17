@@ -146,6 +146,14 @@ export interface ApiKey {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** the key's own tool-call limit per minute; null = the gateway default (D95) */
+  rateLimitPerMin: number | null;
+}
+
+export interface KeyList {
+  keys: ApiKey[];
+  /** 0 = rate limiting off */
+  defaultRateLimitPerMin: number;
 }
 
 export interface CreatedKey {
@@ -159,8 +167,10 @@ export interface CreatedKey {
 export const keysApi = {
   list: (params: { userId?: string; all?: boolean } = {}) => {
     const query = params.all ? '?all=1' : params.userId ? `?userId=${encodeURIComponent(params.userId)}` : '';
-    return api<{ keys: ApiKey[] }>(`/keys${query}`);
+    return api<KeyList>(`/keys${query}`);
   },
+  setLimit: (id: string, rateLimitPerMin: number | null) =>
+    api<{ key: ApiKey }>(`/keys/${id}`, 'PATCH', { rateLimitPerMin }),
   create: (name: string, userId?: string) => api<CreatedKey>('/keys', 'POST', { name, userId }),
   revoke: (id: string) => api<undefined>(`/keys/${id}`, 'DELETE'),
 };

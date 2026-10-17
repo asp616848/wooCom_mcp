@@ -1,7 +1,7 @@
-"""API keys for MCP clients (D52): GET/POST /api/keys, DELETE /api/keys/:id (DESIGN §7.3).
+"""API keys for MCP clients (D52): GET/POST /api/keys, PATCH/DELETE /api/keys/:id (DESIGN §7.3).
 
-Everyone manages their own keys; admins can also list all keys and issue/revoke keys for other users.
-The plaintext key is returned once, at creation.
+Everyone manages their own keys; admins can also list all keys, issue/revoke keys for other users and set a
+key's own tool-call rate limit (D95; null = the gateway default). The plaintext key is returned once.
 """
 
 from datetime import datetime
@@ -12,10 +12,12 @@ from fastapi import APIRouter, Query, Request
 from pydantic import Field
 
 from wmg_common.errors import AppError
+from wmg_common.logging import get_logger
 from wmg_gateway.http.api.models import ApiModel
-from wmg_gateway.http.deps import CurrentUser, Pool
+from wmg_gateway.http.deps import AdminUser, CurrentUser, Pool
 from wmg_gateway.security import api_keys
 
+log = get_logger(__name__)
 router = APIRouter(prefix="/keys", tags=["keys"])
 
 MAX_ACTIVE_KEYS = 10
@@ -30,10 +32,20 @@ class ApiKey(ApiModel):
     created_at: datetime
     last_used_at: datetime | None
     revoked_at: datetime | None
+    rate_limit_per_min: int | None
 
 
 class KeysEnvelope(ApiModel):
     keys: list[ApiKey]
+    default_rate_limit_per_min: int  # 0 = rate limiting off
+
+
+class KeyEnvelope(ApiModel):
+    key: ApiKey
+
+
+class KeyLimit(ApiModel):
+    rate_limit_per_min: int | None = Field(ge=1, le=100_000)
 
 
 class KeyCreate(ApiModel):
@@ -50,7 +62,7 @@ class KeyCreated(ApiModel):
 
 _SELECT = (
     "SELECT k.id, k.name, k.prefix, k.user_id, u.email AS user_email, "
-    "k.created_at, k.last_used_at, k.revoked_at "
+    "k.created_at, k.last_used_at, k.revoked_at, k.rate_limit_per_min "
     "FROM api_keys k JOIN users u ON u.id = k.user_id "
 )
 
@@ -58,6 +70,7 @@ _SELECT = (
 @router.get("")
 async def list_keys(
     user: CurrentUser,
+    request: Request,
     pool: Pool,
     user_id: Annotated[UUID | None, Query(alias="userId")] = None,
     all_users: Annotated[int, Query(alias="all", ge=0, le=1)] = 0,
@@ -71,7 +84,31 @@ async def list_keys(
             rows = await conn.fetch(
                 _SELECT + "WHERE k.user_id = $1 ORDER BY k.created_at DESC", user_id or user.id
             )
-    return KeysEnvelope(keys=[ApiKey.model_validate(dict(r)) for r in rows])
+    return KeysEnvelope(
+        keys=[ApiKey.model_validate(dict(r)) for r in rows],
+        default_rate_limit_per_min=request.app.state.settings.rate_limit_per_min,
+    )
+
+
+@router.patch("/{key_id}")
+async def set_key_limit(key_id: UUID, body: KeyLimit, admin: AdminUser, pool: Pool) -> KeyEnvelope:
+    """Takes effect on the key's next request: every request re-reads the key (NFR-P5)."""
+    async with pool.acquire() as conn:
+        updated = await conn.fetchval(
+            "UPDATE api_keys SET rate_limit_per_min = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING id",
+            key_id,
+            body.rate_limit_per_min,
+        )
+        if updated is None:
+            exists = await conn.fetchval("SELECT 1 FROM api_keys WHERE id = $1", key_id)
+            raise (
+                AppError(409, "CONFLICT", "Key is revoked")
+                if exists
+                else AppError(404, "NOT_FOUND", "Key not found")
+            )
+        row = await conn.fetchrow(_SELECT + "WHERE k.id = $1", key_id)
+    log.info("key rate limit set", key_id=str(key_id), limit=body.rate_limit_per_min, by=str(admin.id))
+    return KeyEnvelope(key=ApiKey.model_validate(dict(row)))
 
 
 @router.post("", status_code=201)

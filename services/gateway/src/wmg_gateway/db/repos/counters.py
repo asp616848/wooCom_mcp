@@ -1,4 +1,4 @@
-"""Fixed-window counters in `rate_counters` (login throttling now, tool-call rate limits in P16)."""
+"""Fixed-window counters in `rate_counters`: login throttling and tool-call rate limits (SO-7)."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,11 +17,11 @@ async def current(conn: Any, key: str, window: timedelta) -> int:
     return int(value or 0)
 
 
-async def increment(conn: Any, key: str, window: timedelta) -> int:
+async def increment(conn: Any, key: str, window: timedelta, now: datetime | None = None) -> int:
     value = await conn.fetchval(
         "INSERT INTO rate_counters (key, window_start, count) VALUES ($1, $2, 1) "
         "ON CONFLICT (key, window_start) DO UPDATE SET count = rate_counters.count + 1 RETURNING count",
         key,
-        window_start(window),
+        window_start(window, now),
     )
     return int(value)

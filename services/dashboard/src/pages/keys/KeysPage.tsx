@@ -61,7 +61,7 @@ export function KeysPage() {
       />
       {keys.isPending && <Loading />}
       {keys.isError && <ErrorState error={keys.error} />}
-      {keys.data && <KeysTable keys={keys.data.keys} showOwner={allUsers} />}
+      {keys.data && <KeysTable list={keys.data} showOwner={allUsers} />}
 
       <Dialog
         open={creating}

@@ -26,6 +26,7 @@ from wmg_gateway.catalog.catalog import server_entry
 from wmg_gateway.db.migrate import migrate
 from wmg_gateway.db.pool import create_pool
 from wmg_gateway.events.bus import EventListener
+from wmg_gateway.housekeeping import Housekeeping
 from wmg_gateway.http.api import (
     audit,
     auth,
@@ -147,6 +148,7 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(checker.run_forever)
+            tg.start_soon(Housekeeping(rt.pool).run_forever)
             if rt.k8s is not None:
                 hooks = {"on_ready": probe_server, "on_removed": forget_server}
                 for reconciler in (StoreReconciler, HostedReconciler):

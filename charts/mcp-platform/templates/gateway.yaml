@@ -115,6 +115,8 @@ spec:
                 secretKeyRef: { name: {{ .Values.gateway.llm.secretName }}, key: api-key-fallback, optional: true }
             - name: TOOL_SEARCH_THRESHOLD
               value: {{ .Values.gateway.toolSearchThreshold | int | quote }}
+            - name: RATE_LIMIT_PER_MIN
+              value: {{ .Values.gateway.rateLimitPerMin | int | quote }}
             - name: K8S_NAMESPACE
               value: {{ .Release.Namespace | quote }}
             {{- with .Values.provisioning }}
