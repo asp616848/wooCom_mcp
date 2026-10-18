@@ -8,7 +8,6 @@ from typing import Any
 
 import mcp_types as types
 from mcp.server import CacheHint, Server
-from mcp.server.auth.settings import AuthSettings
 from mcp.server.subscriptions import ListenHandler
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
@@ -17,6 +16,7 @@ from wmg_gateway import APP_VERSION
 from wmg_gateway.mcp.call_tool import call_tool
 from wmg_gateway.mcp.list_tools import list_tools
 from wmg_gateway.mcp.verifier import WmgTokenVerifier
+from wmg_gateway.oauth.server import auth_server_routes, auth_settings
 from wmg_gateway.runtime import Runtime
 
 TOOLS_LIST_TTL_MS = 10000
@@ -57,12 +57,10 @@ def build_full_server(rt: Runtime) -> tuple[Server[Any], Starlette]:
         stateless_http=True,
         json_response=True,
         transport_security=transport_security(rt),
-        # resource_server_url is a required field (None until OAuth, P17)
-        auth=AuthSettings(
-            issuer_url=rt.settings.public_gateway_url,
-            required_scopes=["mcp"],
-            resource_server_url=None,
-        ),
+        auth=auth_settings(rt, rt.settings.public_mcp_url),
         token_verifier=WmgTokenVerifier(rt),
+        custom_starlette_routes=auth_server_routes(
+            rt
+        ),  # /authorize /token /register /revoke + metadata (D98)
     )
     return server, app

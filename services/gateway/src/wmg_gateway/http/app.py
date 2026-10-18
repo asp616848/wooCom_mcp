@@ -37,6 +37,7 @@ from wmg_gateway.http.api import (
     insights,
     invites,
     keys,
+    oauth,
     servers,
     stores,
     users,
@@ -106,6 +107,10 @@ class Readiness:
         return self._ok
 
 
+# RFC 9728: where /mcp/search publishes its protected-resource metadata
+SEARCH_METADATA_PATH = "/.well-known/oauth-protected-resource" + SEARCH_PATH
+
+
 class McpRouter:
     """Sends `/mcp/search` to the search-mode app (SO-4) and everything else to the full `/mcp` app.
 
@@ -119,7 +124,8 @@ class McpRouter:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
-        app = self.search if path == SEARCH_PATH or path.startswith(SEARCH_PATH + "/") else self.full
+        to_search = path == SEARCH_PATH or path.startswith(SEARCH_PATH + "/") or path == SEARCH_METADATA_PATH
+        app = self.search if to_search else self.full
         try:
             await app(scope, receive, send)
         except ClientDisconnect:
@@ -211,7 +217,20 @@ def create_app(settings: Settings, *, run_leader: bool = True) -> FastAPI:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     api = APIRouter(prefix="/api", dependencies=[Depends(csrf_check)])
-    for module in (auth, users, invites, keys, servers, audit, insights, connect, chat, stores, hosted):
+    for module in (
+        auth,
+        users,
+        invites,
+        keys,
+        servers,
+        audit,
+        insights,
+        connect,
+        chat,
+        stores,
+        hosted,
+        oauth,
+    ):
         api.include_router(module.router)
 
     # Without this, unknown /api paths would fall through to the MCP mount and get its plain-text 404.

@@ -124,6 +124,7 @@ export function AuditPage() {
                     <Td>
                       {item.userEmail ?? '—'}
                       {item.credentialType === 'chat_agent' && <Badge className="ml-1">chat</Badge>}
+                      {item.credentialType === 'oauth' && <Badge className="ml-1">oauth</Badge>}
                     </Td>
                   )}
                   <Td className="font-mono text-xs">

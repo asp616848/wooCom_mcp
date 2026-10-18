@@ -12,7 +12,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { Navigate, NavLink, Outlet, useNavigate } from 'react-router';
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useMe } from '@/auth';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,7 @@ const NAV: NavItem[] = [
 export function Layout() {
   const me = useMe();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const logout = useMutation({
     mutationFn: authApi.logout,
@@ -53,7 +54,8 @@ export function Layout() {
 
   if (me.isPending) return <p className="p-8 text-sm text-zinc-500">Loading…</p>;
   if (me.isError) return <p className="p-8 text-sm text-red-600">Could not reach the gateway.</p>;
-  if (!me.data) return <Navigate to="/login" replace />;
+  if (!me.data)
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   const user = me.data;
 
   return (

@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui/input';
 import { keysApi, type CreatedKey } from '@/lib/api';
 import { KeyCreated } from '@/pages/keys/KeyCreated';
+import { ConnectedApps } from '@/pages/keys/ConnectedApps';
 import { KeysTable } from '@/pages/keys/KeysTable';
 
 export function KeysPage() {
@@ -62,6 +63,7 @@ export function KeysPage() {
       {keys.isPending && <Loading />}
       {keys.isError && <ErrorState error={keys.error} />}
       {keys.data && <KeysTable list={keys.data} showOwner={allUsers} />}
+      <ConnectedApps all={allUsers} />
 
       <Dialog
         open={creating}

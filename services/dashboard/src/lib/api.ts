@@ -243,11 +243,44 @@ export const auditApi = {
   },
 };
 
+// ---- oauth (SO-3, D98) ----
+export interface OAuthRequest {
+  clientName: string;
+  redirectHost: string;
+  redirectUri: string;
+  scopes: string[];
+  expiresAt: string;
+}
+
+export interface ConnectedApp {
+  clientId: string;
+  clientName: string;
+  userId: string;
+  userEmail: string;
+  authorizedAt: string;
+  lastAuthorizedAt: string;
+  activeTokens: number;
+}
+
+export const oauthApi = {
+  request: (id: string) => api<{ request: OAuthRequest }>(`/oauth/requests/${encodeURIComponent(id)}`),
+  approve: (id: string) =>
+    api<{ redirectUrl: string }>(`/oauth/requests/${encodeURIComponent(id)}/approve`, 'POST'),
+  deny: (id: string) =>
+    api<{ redirectUrl: string }>(`/oauth/requests/${encodeURIComponent(id)}/deny`, 'POST'),
+  apps: (all = false) => api<{ apps: ConnectedApp[] }>(`/oauth/apps${all ? '?all=1' : ''}`),
+  revoke: (app: ConnectedApp) =>
+    api<undefined>(
+      `/oauth/apps/${encodeURIComponent(app.clientId)}?userId=${encodeURIComponent(app.userId)}`,
+      'DELETE',
+    ),
+};
+
 // ---- connect ----
 export interface ConnectInfo {
   mcpUrl: string;
   searchMcpUrl: string | null;
-  snippets: { claudeCode: string; cursor: string; inspector: string };
+  snippets: { claudeCode: string; claudeCodeOauth: string; cursor: string; inspector: string };
 }
 
 export const KEY_PLACEHOLDER = '<YOUR_API_KEY>';

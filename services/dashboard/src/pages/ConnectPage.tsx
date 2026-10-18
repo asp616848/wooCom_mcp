@@ -26,7 +26,17 @@ export function ConnectPage() {
             </CardContent>
           </Card>
           <p className="text-sm text-zinc-600">
-            Replace <code className="font-mono">&lt;YOUR_API_KEY&gt;</code> with a key from{' '}
+            <strong>Without a key:</strong> clients that support MCP authorization (Claude Code, Inspector)
+            sign you in with your browser. Approved apps are listed, and revocable, under{' '}
+            <Link to="/keys" className="text-brand hover:underline">
+              API keys → Connected apps
+            </Link>
+            .
+          </p>
+          <CodeBlock title="Claude Code (browser sign-in)" code={info.data.snippets.claudeCodeOauth} />
+          <p className="text-sm text-zinc-600">
+            <strong>With a key:</strong> replace <code className="font-mono">&lt;YOUR_API_KEY&gt;</code> with
+            a key from{' '}
             <Link to="/keys" className="text-brand hover:underline">
               API keys
             </Link>{' '}

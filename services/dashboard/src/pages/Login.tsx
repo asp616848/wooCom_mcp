@@ -1,16 +1,18 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router';
+import { Navigate, useNavigate, useSearchParams } from 'react-router';
 
 import { useMe } from '@/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Label } from '@/components/ui/input';
 import { ApiError, authApi } from '@/lib/api';
+import { safeNext } from '@/lib/oauth';
 
 export function LoginPage() {
   const me = useMe();
   const navigate = useNavigate();
+  const next = safeNext(useSearchParams()[0].get('next')) ?? '/servers';
   const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,11 +21,11 @@ export function LoginPage() {
     meta: { silent: true },
     onSuccess: ({ user }) => {
       queryClient.setQueryData(['me'], user);
-      navigate('/servers', { replace: true });
+      navigate(next, { replace: true });
     },
   });
 
-  if (me.data) return <Navigate to="/servers" replace />;
+  if (me.data) return <Navigate to={next} replace />;
 
   function submit(event: FormEvent) {
     event.preventDefault();
