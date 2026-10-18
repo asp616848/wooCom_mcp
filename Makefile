@@ -66,7 +66,7 @@ SEED_SOURCES := woo-main=$(STORE_NS)/$(STORE)-store-credentials/mcp-token \
                 pincode=$(UPSTREAMS_NS)/pincode-mcp-auth/token
 
 .PHONY: help up down reset cluster cluster-delete store store-uninstall store-test store-admin-password setup-logs \
-        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e e2e-scale e2e-upgrades perf backup-store restore-store store-upgrade verify-k8s images kubeconform upstreams upstreams-uninstall \
+        status deps lint chart-lint typecheck mypy test test-integration test-k8s e2e e2e-scale e2e-upgrades e2e-oauth perf backup-store restore-store store-upgrade verify-k8s images kubeconform upstreams upstreams-uninstall \
         e2e-stores e2e-hosted platform-ns seed-credentials secrets-llm vps-bootstrap vps-tunnel vps-ssh prod-secrets prod-acme-netpol prod-up llm-models llm-smoke platform platform-uninstall admin-password
 
 help: ## List targets
@@ -234,6 +234,9 @@ e2e-scale: ## SO-7 two replicas: NFR-P1/P2 in-cluster, leader kills under load, 
 
 e2e-upgrades: ## SO9-01 helm upgrade + rollback of gateway, pincode and store (backup/restore) on the local cluster (~6 min)
 	$(UV_RUN) pytest tests/e2e/test_upgrades.py -m bonus -v -rP --durations=0
+
+e2e-oauth: ## SO-3 OA-01 MCP OAuth flow (SDK OAuth client, consent, audit, revoke) against the running cluster (~30 s)
+	$(UV_RUN) pytest tests/e2e/test_oauth.py -m bonus -v --durations=0
 
 perf: ## TESTING §7 autocannon run through the ingress (PERF_AUTH='Authorization=Bearer <key>' RUN=list|call)
 	tests/perf/run.sh $(or $(RUN),list) 30 0 | tail -1

@@ -127,6 +127,12 @@ How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provi
 - **Upgrades and rollback**: `make store-upgrade` backs up the store first; any release goes back with `helm
   rollback`, and `make restore-store` brings store data back. Runbook: [docs/upgrades-rollback.md](docs/upgrades-rollback.md).
 
+- **Browser sign-in (OAuth)**: add the gateway URL to Claude Code *without* a key
+  (`claude mcp add --transport http woo-gateway <gateway>/mcp`), then `/mcp` → *Authenticate*. The browser opens a
+  consent page; approve it and the app works with your permissions (access tokens last an hour and renew on their
+  own). Approved apps are listed, and revocable at once, under **API keys → Connected apps**; the audit log marks
+  their calls `oauth`. API keys keep working side by side.
+
 ## Make targets
 | Target | What it does |
 |---|---|
@@ -140,6 +146,7 @@ How it works: [docs/system-design.md](docs/system-design.md#11-bonus-store-provi
 | `make e2e-stores` | bonus store provisioning tests (creates/deletes `paris` and `tokyo`, ~15 min) |
 | `make e2e-hosted` | hosted MCP server test (deploys and removes `pincode-hosted`, ~1 min) |
 | `make e2e-scale` | two replicas: latency in-cluster, leader killed under load, PDB, rate limit (`make platform SCALE=1` first, ~3 min) |
+| `make e2e-oauth` | MCP OAuth flow through the ingress: sign-in, tool call, audit, revoke (~30 s) |
 | `make e2e-upgrades` | upgrade + rollback of gateway, pincode and store with backup/restore (~2 min) |
 | `make backup-store`, `make restore-store TS=…`, `make store-upgrade` | store backup to `backups/`, restore, backup-then-upgrade |
 | `make vps-bootstrap`, `make prod-up`, `make vps-tunnel` | VPS: k3s + cert-manager, deploy everything with prod values, reopen the API tunnel |
