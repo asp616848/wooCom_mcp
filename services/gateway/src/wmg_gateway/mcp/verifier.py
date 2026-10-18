@@ -1,4 +1,5 @@
-"""`/mcp` bearer verification (DESIGN §7.1): API keys (`mgw_…`) and delegated chat JWTs. OAuth tokens: P17.
+"""`/mcp` bearer verification (DESIGN §7.1): API keys (`mgw_…`), OAuth access tokens (`mgo_…`, D98)
+and delegated chat JWTs.
 
 Returning None makes the SDK's RequireAuthMiddleware answer 401 `invalid_token`. When the credential is real
 but not usable (revoked key, disabled user) we know who it was, so a `denied` audit row is written first
@@ -12,6 +13,7 @@ from typing import Any
 from mcp.server.auth.provider import AccessToken
 
 from wmg_gateway.audit.audit import AuditRecord, CredentialType
+from wmg_gateway.oauth import provider as oauth_provider
 from wmg_gateway.request_context import request_meta
 from wmg_gateway.runtime import Runtime
 from wmg_gateway.security import api_keys
@@ -27,9 +29,30 @@ class WmgTokenVerifier:
     async def verify_token(self, token: str) -> AccessToken | None:
         if token.startswith(api_keys.KEY_PREFIX):
             return await self._api_key(token)
+        if token.startswith(oauth_provider.ACCESS_PREFIX):
+            return await self._oauth(token)
         if delegated_jwt.looks_like_jwt(token):
             return await self._delegated(token)
         return None
+
+    async def _oauth(self, token: str) -> AccessToken | None:
+        """An `mgo_` access token (D98): role and status are read live, so revoking the app or disabling the
+        user ends access on the very next request."""
+        pepper = self._rt.settings.api_key_pepper.get_secret_value()
+        async with self._rt.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT t.client_id, t.expires_at, u.id AS user_id, u.email, u.role, u.status "
+                "FROM oauth_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1 "
+                "AND t.kind = 'access' AND t.revoked_at IS NULL AND t.expires_at > now()",
+                api_keys.hash_key(token, pepper),
+            )
+        if row is None:
+            return None
+        credential_id = oauth_provider.credential_id(row["client_id"], row["user_id"])
+        if row["status"] != "active":
+            await self._denied(row, "oauth", credential_id, "User disabled")
+            return None
+        return self._access_token(token, row, "oauth", credential_id, int(row["expires_at"].timestamp()))
 
     async def _api_key(self, key: str) -> AccessToken | None:
         prefix = api_keys.prefix_of(key)

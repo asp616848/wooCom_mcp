@@ -16,6 +16,7 @@ import { InvitePage } from '@/pages/InvitePage';
 import { KeysPage } from '@/pages/keys/KeysPage';
 import { Layout } from '@/pages/Layout';
 import { LoginPage } from '@/pages/Login';
+import { OAuthConsentPage } from '@/pages/OAuthConsentPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { NewServerPage } from '@/pages/servers/NewServerPage';
 import { ServerDetailPage } from '@/pages/servers/ServerDetailPage';
@@ -42,6 +43,7 @@ const queryClient: QueryClient = new QueryClient({
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/invite/:token', element: <InvitePage /> },
+  { path: '/oauth/consent', element: <OAuthConsentPage /> },
   {
     path: '/',
     element: <Layout />,

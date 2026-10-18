@@ -74,9 +74,10 @@ async def test_housekeeping_counters_every_tick_audit_once_a_day_at_3() -> None:
     hk = Housekeeping(pool)
     two = datetime(2026, 10, 18, 2, 59, tzinfo=UTC)
     await hk.tick(two)
-    assert pool.conn.executed == [
-        ("DELETE FROM rate_counters WHERE window_start < $1", two - timedelta(hours=1))
-    ]
+    rest = [e for e in pool.conn.executed if "oauth_" not in e[0]]
+    assert rest == [("DELETE FROM rate_counters WHERE window_start < $1", two - timedelta(hours=1))]
+    oauth = [sql.split()[2] for sql, _ in pool.conn.executed if "oauth_" in sql]  # DELETE FROM <table>
+    assert oauth == ["oauth_requests", "oauth_codes", "oauth_tokens", "oauth_clients"]  # D98: every tick
     three = datetime(2026, 10, 18, 3, 0, 30, tzinfo=UTC)
     await hk.tick(three)
     await hk.tick(three + timedelta(minutes=1))  # same day: audit pruned once

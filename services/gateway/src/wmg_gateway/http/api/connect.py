@@ -20,6 +20,7 @@ INSPECTOR = "npx @modelcontextprotocol/inspector@2.10.1"
 
 class Snippets(ApiModel):
     claude_code: str
+    claude_code_oauth: str  # sign in with the browser, no key to copy (SO-3)
     cursor: str
     inspector: str
 
@@ -34,6 +35,10 @@ def build_snippets(mcp_url: str) -> Snippets:
     auth = f"Bearer {KEY_PLACEHOLDER}"
     cursor = {"mcpServers": {SERVER_NAME: {"url": mcp_url, "headers": {"Authorization": auth}}}}
     return Snippets(
+        claude_code_oauth=(
+            f"claude mcp add --transport http {SERVER_NAME} {mcp_url}\n"
+            "# then in Claude Code: /mcp -> woo-gateway -> Authenticate (your browser opens a consent page)"
+        ),
         claude_code=(
             f'claude mcp add --transport http {SERVER_NAME} {mcp_url} --header "Authorization: {auth}"'
         ),

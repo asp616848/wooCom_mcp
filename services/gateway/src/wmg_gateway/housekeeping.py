@@ -1,5 +1,7 @@
 """Leader housekeeping (DESIGN §5.12, D60, D95): every minute, delete `rate_counters` windows older than
-1 hour; once a day in the 03:00 UTC hour, delete audit rows older than 30 days.
+1 hour; once a day in the 03:00 UTC hour, delete audit rows older than 30 days. OAuth leftovers go every
+tick too: expired pending requests and codes, tokens a week past expiry or revocation, and registered apps
+nobody ever approved after 7 days (D98).
 
 Counters keep 1 hour, not the 10 minutes DESIGN first said: login lockouts share the table (15-minute window).
 """
@@ -17,6 +19,7 @@ INTERVAL_S = 60.0
 COUNTER_TTL = timedelta(hours=1)
 AUDIT_RETENTION = timedelta(days=30)
 AUDIT_HOUR_UTC = 3
+OAUTH_KEEP = timedelta(days=7)
 
 
 class Housekeeping:
@@ -41,10 +44,26 @@ class Housekeeping:
             )
             if (counters := _rows(status)) > 0:
                 log.info("rate counters pruned", rows=counters)
+            await self._oauth(conn, now)
             if now.hour == AUDIT_HOUR_UTC and self._audit_pruned_on != now.date():
                 status = await conn.execute("DELETE FROM audit_log WHERE ts < $1", now - AUDIT_RETENTION)
                 self._audit_pruned_on = now.date()
                 log.info("audit retention applied", rows=_rows(status), days=AUDIT_RETENTION.days)
+
+    @staticmethod
+    async def _oauth(conn: Any, now: datetime) -> None:
+        stale = now - OAUTH_KEEP
+        await conn.execute("DELETE FROM oauth_requests WHERE expires_at < $1", now)
+        await conn.execute("DELETE FROM oauth_codes WHERE expires_at < $1", stale)
+        await conn.execute(
+            "DELETE FROM oauth_tokens WHERE expires_at < $1 OR revoked_at < $1",
+            stale,
+        )
+        await conn.execute(
+            "DELETE FROM oauth_clients c WHERE c.created_at < $1 AND NOT EXISTS "
+            "(SELECT 1 FROM oauth_consents k WHERE k.client_id = c.client_id)",
+            stale,
+        )
 
 
 def _rows(status: str) -> int:

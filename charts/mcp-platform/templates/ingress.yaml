@@ -1,5 +1,5 @@
 # dashboard host: /api → gateway, / → dashboard (same origin, so the session cookie needs no CORS).
-# gateway host: /mcp (and /mcp/search) → gateway, for MCP clients.
+# gateway host: /mcp (and /mcp/search) and the OAuth endpoints → gateway, for MCP clients.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -55,3 +55,10 @@ spec:
             pathType: Prefix
             backend:
               service: { name: {{ .Release.Name }}-gateway, port: { name: http } }
+          # MCP authorization (OAuth, SO-3): the gateway is the authorization server for its own clients
+          {{- range list "/authorize" "/token" "/register" "/revoke" "/.well-known" }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service: { name: {{ $.Release.Name }}-gateway, port: { name: http } }
+          {{- end }}

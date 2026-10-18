@@ -12,7 +12,6 @@ from typing import Any
 import mcp_types as types
 from mcp import MCPError
 from mcp.server import Server
-from mcp.server.auth.settings import AuthSettings
 from starlette.applications import Starlette
 
 from wmg_gateway import APP_VERSION
@@ -21,6 +20,7 @@ from wmg_gateway.mcp.call_tool import call_exposed
 from wmg_gateway.mcp.caller import caller_from
 from wmg_gateway.mcp.servers import transport_security
 from wmg_gateway.mcp.verifier import WmgTokenVerifier
+from wmg_gateway.oauth.server import auth_settings
 from wmg_gateway.runtime import Runtime
 
 SEARCH_PATH = "/mcp/search"
@@ -182,9 +182,7 @@ def build_search_server(rt: Runtime) -> tuple[Server[Any], Starlette]:
         stateless_http=True,
         json_response=True,
         transport_security=transport_security(rt),
-        auth=AuthSettings(
-            issuer_url=rt.settings.public_gateway_url, required_scopes=["mcp"], resource_server_url=None
-        ),
+        auth=auth_settings(rt, rt.settings.public_mcp_url.rstrip("/") + "/search"),
         token_verifier=WmgTokenVerifier(rt),
     )
     return server, app
