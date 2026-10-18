@@ -106,6 +106,8 @@ for 72 hours, stored only as a hash.
 | A user exhausts the cluster with stores | 2 per user, 4 total (checked under a DB lock); ResourceQuota + LimitRange per store namespace; Job deadlines |
 | Privileged containers | PSA `restricted` on platform and upstream namespaces; `baseline` on the store (Apache) |
 | Secrets in Git | none: generated in-cluster or created from a git-ignored `.env`; `.gitignore` blocks env and key files |
+| A rogue app registers itself and phishes a consent | registration is open (MCP requires it) but only public clients with https or localhost redirects; the consent page shows the app's name and where it returns you, needs a signed-in user and an explicit Approve every time; at most 200 apps and 500 pending requests; unapproved apps are deleted after 7 days |
+| An OAuth code or token is stolen | PKCE S256 binds a code to the app that asked; codes live 10 minutes and work once (replay revokes what they issued); access tokens last 1 hour; refresh tokens rotate and reuse revokes the family; all are stored hashed; Connected apps revokes at once |
 | Store backups leak | `backups/` is git-ignored and written owner-only (`umask 077`); a backup holds password hashes and WooCommerce API keys, so treat it like a Secret; the scripts read database passwords inside the pods, never on the operator's command line |
 
 ## Residual risks and next steps

@@ -181,3 +181,11 @@ store namespaces it binds itself into, and a ValidatingAdmissionPolicy rejects a
   migrations only add (so an older image runs on a newer schema), and the store's setup Job also runs after a
   rollback. Store data is the one thing Helm can't undo: `make store-upgrade` backs it up first and
   `make restore-store` restores it. Runbook and what the tests prove: [upgrades-rollback.md](upgrades-rollback.md).
+- **OAuth sign-in (SO-3)**: besides API keys, the gateway is its own OAuth authorization server for MCP clients, using
+  the SDK's embedded server on the gateway host (`/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/…`).
+  Clients register themselves (public clients only, PKCE S256, https or localhost redirects); `/authorize` parks the
+  request in Postgres and sends the browser to the dashboard's consent page, where a signed-in user must approve every
+  time; approval issues a single-use code, which the app trades for an hour-long `mgo_` access token and a rotating
+  30-day refresh token. Tokens are stored as hashes; a replayed code or a reused refresh token revokes everything
+  issued from it. The verifier reads the user's role and status on every request, so revoking the app or disabling the
+  user ends access on the next call. Calls are audited as `oauth` and rate-limited per user and app.
