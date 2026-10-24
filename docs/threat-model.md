@@ -1,6 +1,6 @@
 # Threat model
 
-Draft (core complete). What we protect, from whom, how, and what is left over.
+What we protect, from whom, how, and what is left over. Sections 1–4 answer the four questions the assignment asks.
 
 ## Assets
 - **Upstream credentials**: the WooCommerce MCP token (behind it, a REST key that can create products and read

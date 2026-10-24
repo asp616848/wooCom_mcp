@@ -1,7 +1,7 @@
 # System design and tradeoffs
 
-Draft (core complete). Covers the architecture, how tools are aggregated and routed, how failures are contained, and
-what changes between the laptop (k3d) and a VPS (k3s).
+Architecture, how tools are aggregated and routed, how failures are contained, and what changes between the laptop
+(k3d) and a VPS (k3s). Bonus and stand-out designs: [stand-out.md](stand-out.md).
 
 ## 1. Goals that shaped the design
 1. **One door.** Every MCP call, from an external client or from the chat agent, passes the same pipeline:
@@ -25,6 +25,12 @@ what changes between the laptop (k3d) and a VPS (k3s).
 | gateway | `mcp-platform` | `/mcp` for MCP clients, `/api` for the dashboard, health checks, chat agent |
 | dashboard | `mcp-platform` | static React app (nginx) |
 | Postgres | `mcp-platform` | users, sessions, keys, servers, tool catalog, policies, audit log |
+
+**How woo-mcp talks to the store: the WooCommerce REST API (v3)**, in-cluster over HTTP to the WordPress Service,
+each request signed with OAuth 1.0a (HMAC-SHA256). The REST API is WooCommerce's supported contract, so validation,
+stock and order hooks run as they would for any client. WooCommerce only accepts Basic auth over HTTPS, and signing keeps the secret off the wire without TLS
+inside the cluster. Rejected: WP-CLI (needs `pods/exec` RBAC and starts PHP for every call) and direct SQL (bypasses
+WooCommerce's logic).
 
 All Python services are built from one uv workspace and share `wmg_common` (structured logging with secret redaction,
 settings that fail fast, a static-credential auth middleware for the upstream servers).
@@ -127,65 +133,5 @@ Upgrades are `helm upgrade` with a new image tag; rollback is `helm rollback <re
 | One process for API, MCP and chat | fewer moving parts to deploy and explain | a heavy chat load shares CPU with MCP routing (scale replicas) |
 | WordPress via the official Apache image | well known, simple | runs as root (namespace PSA is baseline instead of restricted) |
 
-## 11. Bonus: store provisioning
-Anyone signed in can create a store (2 per user, 4 in total). The API only records the request (`stores` row,
-status `provisioning`, a fresh MCP token encrypted at rest) and answers 202; the work happens in Kubernetes:
-
-1. **Reconciler** (leader replica, every 5 s): for each store in flight it compares the database row with the
-   Job of the same deterministic name (`wmg-prov-<name>-<id8>-<attempt>`). No Job yet → create an input Secret
-   (per-store values + MCP token) and the Job (at most 3 at once, the rest wait as `queued`). Job succeeded →
-   register `woo-<name>` as an MCP server (bearer token, admin-only write tools like the main store), mark `ready`,
-   probe it so its tools appear at once. Job failed or past its deadline → `failed` with the Job's reason and the
-   last log lines; *Retry* starts attempt + 1.
-2. **Deployer Job** (`wmg/deployer`: helm + kubectl + the chart, checksummed): creates the namespace, binds itself
-   to the store role there, creates the store's credentials once, repairs a release a killed pod left half-done,
-   then `helm upgrade --install … --wait --rollback-on-failure` and `helm test` (a signed WooCommerce call through
-   the store's own woo-mcp).
-3. **Delete**: the MCP registration goes first (tools vanish within a second), then a teardown Job uninstalls the
-   release and deletes the namespace (volumes and Secrets with it), then the row.
-
-Why Jobs and not the gateway itself: a Job keeps running if the gateway restarts, Kubernetes retries a killed pod,
-and the gateway needs no rights outside its own namespace. Any replica that becomes leader resumes from the database
-and the Job list. Every database update checks the (status, attempt) it read, so a delete during provisioning is
-never overwritten.
-
-Guardrails: per-namespace ResourceQuota + LimitRange (BR-6; bonus stores use a smaller profile so four fit next to
-the main store), provisioning timeout at Job and reconciler level, per-user and total limits enforced under one
-database lock. Isolation: each store's NetworkPolicies only let its woo-mcp reach its own WordPress, so `paris` can't
-reach `tokyo`'s database (tested). The deployer is confined twice: RBAC gives it no namespaced rights outside the
-store namespaces it binds itself into, and a ValidatingAdmissionPolicy rejects any write it makes outside
-`store-<name>` (never `store-main`).
-
-## 12. Stand-out features
-- **Tool permissions (SO-2)**: `tool_policies` rows (admin-only on/off per tool) live in the in-memory catalog of
-  every replica; a change NOTIFYs all of them, so `tools/list` and `tools/call` enforce it within a second. Woo write
-  tools start admin-only.
-- **Observability (SO-8)**: Prometheus counters and histograms per server (`wmg_tool_calls_total`,
-  `wmg_tool_call_duration_seconds`, `wmg_upstream_up`, `wmg_upstream_tools`, `wmg_tools_list_duration_seconds`) and an
-  Insights page computed from the audit log, so its numbers always match the audit trail.
-- **Many tools (SO-4)**: `/mcp/search` is a second MCP endpoint with three fixed tools. `search_tools` ranks the tools
-  the caller may use by the words of the query (name, title, description, input schema); `call_tool` runs one through
-  the normal path, audited as the real tool. The chat agent uses it when a user can see more than 40 tools.
-- **Hosted servers (SO-5)**: the store machinery reused for any MCP server image: an admin request becomes a disabled
-  server row plus a deploy request; the leader's reconciler runs a deployer Job that installs the generic
-  `mcp-server` chart into `mcp-hosted` with a credential the gateway generated, then enables the server. The
-  namespace has its own quota and limits, and the admission policy keeps the deployer from touching them.
-- **Scaling (SO-7)**: replicas share nothing in memory that matters: the catalog reloads on Postgres NOTIFY, the
-  rate-limit counters are rows (`rate_counters`, one per key per minute, so the limit holds across replicas), and the
-  leader is whoever holds a Postgres advisory lock. A leader that dies releases it with its connection; one that
-  vanishes without closing it is dropped by Postgres TCP keepalives (~8 s); followers retry every 2 s, and a leader
-  that loses its connection stops its duties at once, so two never run together. Production runs two replicas with a
-  PodDisruptionBudget. Measured in-cluster at 50 rps: `tools/list` p95 ≈ 10 ms, gateway overhead on `tools/call` p95
-  ≈ 2–3 ms.
-- **Upgrades and rollback (SO-9)**: every component is a Helm release, images are tagged by git sha, gateway
-  migrations only add (so an older image runs on a newer schema), and the store's setup Job also runs after a
-  rollback. Store data is the one thing Helm can't undo: `make store-upgrade` backs it up first and
-  `make restore-store` restores it. Runbook and what the tests prove: [upgrades-rollback.md](upgrades-rollback.md).
-- **OAuth sign-in (SO-3)**: besides API keys, the gateway is its own OAuth authorization server for MCP clients, using
-  the SDK's embedded server on the gateway host (`/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/…`).
-  Clients register themselves (public clients only, PKCE S256, https or localhost redirects); `/authorize` parks the
-  request in Postgres and sends the browser to the dashboard's consent page, where a signed-in user must approve every
-  time; approval issues a single-use code, which the app trades for an hour-long `mgo_` access token and a rotating
-  30-day refresh token. Tokens are stored as hashes; a replayed code or a reused refresh token revokes everything
-  issued from it. The verifier reads the user's role and status on every request, so revoking the app or disabling the
-  user ends access on the next call. Calls are audited as `oauth` and rate-limited per user and app.
+## 11. Bonus and stand-out items
+Multi-store provisioning, and how each of the nine stand-out items is built and tested: [stand-out.md](stand-out.md).
