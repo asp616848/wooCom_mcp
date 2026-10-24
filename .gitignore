@@ -36,3 +36,9 @@ htmlcov/
 # Local images, backups, prod env
 .image-tag
 backups/
+
+# Assignment brief (keep local, not on GitHub)
+*.pdf
+
+# graphify: commit graph outputs, not the local cache
+graphify-out/cache/
